@@ -13,8 +13,8 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::punctuated::Punctuated;
 use syn::{
-    parse::Parse, parse::ParseStream, parse_macro_input, Data, DeriveInput, Field, Fields, Ident,
-    Meta, Token,
+    Data, DeriveInput, Field, Fields, Ident, Meta, Token, parse::Parse, parse::ParseStream,
+    parse_macro_input,
 };
 
 /// Generate a GraphQL mutation result type with success, error, and optional entity field.
@@ -44,10 +44,10 @@ use syn::{
 /// }
 ///
 /// impl CreateResult {
-///     pub fn success(entity: Entity) -> Self {
+///     pub fn ok(entity: Entity) -> Self {
 ///         Self { success: true, error: None, entity: Some(entity) }
 ///     }
-///     pub fn error(msg: impl Into<String>) -> Self {
+///     pub fn err(msg: impl Into<String>) -> Self {
 ///         Self { success: false, error: Some(msg.into()), entity: None }
 ///     }
 /// }
@@ -69,7 +69,7 @@ pub fn mutation_result(input: TokenStream) -> TokenStream {
             }
 
             impl #struct_name {
-                pub fn success(#field_name: #field_type) -> Self {
+                pub fn ok(#field_name: #field_type) -> Self {
                     Self {
                         success: true,
                         error: None,
@@ -77,7 +77,7 @@ pub fn mutation_result(input: TokenStream) -> TokenStream {
                     }
                 }
 
-                pub fn error(msg: impl Into<String>) -> Self {
+                pub fn err(msg: impl Into<String>) -> Self {
                     Self {
                         success: false,
                         error: Some(msg.into()),
@@ -97,14 +97,14 @@ pub fn mutation_result(input: TokenStream) -> TokenStream {
             }
 
             impl #struct_name {
-                pub fn success() -> Self {
+                pub fn ok() -> Self {
                     Self {
                         success: true,
                         error: None,
                     }
                 }
 
-                pub fn error(msg: impl Into<String>) -> Self {
+                pub fn err(msg: impl Into<String>) -> Self {
                     Self {
                         success: false,
                         error: Some(msg.into()),
@@ -525,7 +525,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             return Err(syn::Error::new_spanned(
                 input,
                 "GraphQLEntity can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -535,7 +535,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             return Err(syn::Error::new_spanned(
                 input,
                 "GraphQLEntity requires named fields",
-            ))
+            ));
         }
     };
 
@@ -1397,7 +1397,7 @@ fn rust_type_to_sql_type(ty: &syn::Type, meta: &FieldMetadata) -> &'static str {
             match type_name.as_str() {
                 "String" | "str" => return "TEXT",
                 "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => {
-                    return "INTEGER"
+                    return "INTEGER";
                 }
                 "f32" | "f64" => return "REAL",
                 "bool" => return "INTEGER",
@@ -1484,7 +1484,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             return Err(syn::Error::new_spanned(
                 input,
                 "GraphQLRelations can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -1494,7 +1494,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             return Err(syn::Error::new_spanned(
                 input,
                 "GraphQLRelations requires named fields",
-            ))
+            ));
         }
     };
 
@@ -1976,7 +1976,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             return Err(syn::Error::new_spanned(
                 input,
                 "GraphQLOperations can only be derived for structs",
-            ))
+            ));
         }
     };
 
@@ -1986,7 +1986,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             return Err(syn::Error::new_spanned(
                 input,
                 "GraphQLOperations requires named fields",
-            ))
+            ));
         }
     };
 
@@ -3365,7 +3365,10 @@ impl Parse for SchemaRootsArgs {
                 extra_subscription_types = parse_list(&content)?;
                 let _: Option<Token![,]> = input.parse().ok();
             } else {
-                return Err(syn::Error::new(label.span(), "expected `extra_mutation_types`, `extra_query_types`, or `extra_subscription_types`"));
+                return Err(syn::Error::new(
+                    label.span(),
+                    "expected `extra_mutation_types`, `extra_query_types`, or `extra_subscription_types`",
+                ));
             }
         }
 
