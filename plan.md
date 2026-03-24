@@ -158,6 +158,7 @@
 - Initialised a git repository locally and configured the local author identity.
 - Removed the duplicate top-level `macro.rs` after moving the implementation into `src/lib.rs`.
 - Added architecture and backend-generalisation design notes under `docs/`.
+- Added host-integration notes documenting the current generated-code contract and a proposed `RelationQueryKey` / batched-loader direction.
 - Added a basic GitHub Actions CI workflow for formatting and `cargo check`.
 - Local `cargo check` is currently blocked by the environment missing a C linker (`cc`/`clang`/`gcc` not installed).
 - Created and pushed the initial GitHub repository at `https://github.com/Dastari/graphql-orm-macros`.
