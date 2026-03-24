@@ -158,5 +158,9 @@
 - Initialised a git repository locally and configured the local author identity.
 - Removed the duplicate top-level `macro.rs` after moving the implementation into `src/lib.rs`.
 - Added architecture and backend-generalisation design notes under `docs/`.
+- Added a basic GitHub Actions CI workflow for formatting and `cargo check`.
 - Local `cargo check` is currently blocked by the environment missing a C linker (`cc`/`clang`/`gcc` not installed).
+- Created and pushed the initial GitHub repository at `https://github.com/Dastari/graphql-orm-macros`.
+- Reduced repeated field-metadata parsing in the relations generator by introducing cached parsed-field collection.
+- Improved current N+1 behavior for compatible single-object relations by using the existing DataLoader fast path instead of always falling back to direct queries.
 - Next execution item: design and introduce internal relation-query key abstractions so nested relation batching can work even when `Where`/`OrderBy`/`Page` are present.

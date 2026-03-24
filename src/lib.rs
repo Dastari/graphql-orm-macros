@@ -1680,11 +1680,13 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                     return Ok(None);
                 };
                 let relation_sql_value = #sql_value_expr;
+                let relation_loader_key = #loader_key_expr;
             }
         } else {
             quote! {
                 let value = &self.#source_field;
                 let relation_sql_value = #sql_value_expr;
+                let relation_loader_key = #loader_key_expr;
             }
         };
 
@@ -1817,8 +1819,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 }
             })
         } else {
-            // Single relation (many-to-one) - uses direct query
-            // TODO: Could batch these too with a reverse lookup pattern
+            // Single relation (many-to-one) - uses DataLoader when the source key supports it
             Ok(quote! {
                 /// Get related #graphql_name
                 #[graphql(name = #graphql_name)]
@@ -1832,14 +1833,26 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                     let db = ctx.data_unchecked::<crate::db::Database>();
                     #source_binding_single
 
-                    let result = EntityQuery::<#target_type>::new()
-                        .where_clause(
-                            &format!("{} = ?", #fk_column),
-                            relation_sql_value
-                        )
-                        .fetch_one(db)
-                        .await
-                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    let result = if #source_supports_dataloader {
+                        use crate::graphql::loaders::RelationLoader;
+                        use async_graphql::dataloader::DataLoader;
+
+                        let loader = ctx.data_unchecked::<DataLoader<RelationLoader<#target_type>>>();
+                        loader
+                            .load_one(relation_loader_key)
+                            .await
+                            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                            .and_then(|mut entities| entities.drain(..).next())
+                    } else {
+                        EntityQuery::<#target_type>::new()
+                            .where_clause(
+                                &format!("{} = ?", #fk_column),
+                                relation_sql_value
+                            )
+                            .fetch_one(db)
+                            .await
+                            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    };
 
                     Ok(result)
                 }
