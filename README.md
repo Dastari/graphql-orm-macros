@@ -19,12 +19,16 @@ Use it with:
 - `#[derive(GraphQLOperations)]`
 - `schema_roots!`
 
-## Near-Term Roadmap
+## Runtime Status
 
-1. Expand runtime metadata and migration support in `graphql-orm`.
-2. Improve relation batching for nested queries with filters, sorting, and pagination.
-3. Introduce full SQL dialect abstractions for SQLite, PostgreSQL, MySQL, and SQL Server.
-4. Add examples and integration docs for application crates.
+The paired `graphql-orm` runtime now provides:
+
+- runtime metadata types generated from derives
+- backend-aware query rendering for SQLite and PostgreSQL
+- schema models, diffing, migration planning, migration-file rendering, and live schema introspection
+- live integration coverage for generated CRUD, nested relations, subscriptions, and N+1-preload behavior
+
+The macro crate remains responsible for code generation. Runtime execution, schema inspection, and migration behavior live in `graphql-orm`.
 
 ## Development
 

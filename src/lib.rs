@@ -729,6 +729,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
     let mut order_by_fields = Vec::new();
     let mut filter_to_sql = Vec::new();
     let mut from_row_fields = Vec::new();
+    let mut relation_metadata_defs = Vec::new();
     let mut sortable_columns: Vec<String> = Vec::new();
 
     for field in fields {
@@ -738,6 +739,37 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
 
         // Skip relation fields for column list
         if field_meta.is_relation || field_meta.skip_db {
+            if field_meta.is_relation {
+                let rust_name = field_name.to_string();
+                let graphql_name = field_meta
+                    .graphql_name
+                    .clone()
+                    .unwrap_or_else(|| to_pascal_case(&rust_name));
+                let target_type = field_meta
+                    .relation_target
+                    .clone()
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let source_column = field_meta
+                    .relation_from
+                    .clone()
+                    .unwrap_or_else(|| "id".to_string());
+                let target_column = field_meta
+                    .relation_to
+                    .clone()
+                    .unwrap_or_else(|| "unknown_id".to_string());
+                let is_multiple = field_meta.relation_multiple;
+
+                relation_metadata_defs.push(quote! {
+                    ::graphql_orm::graphql::orm::RelationMetadata {
+                        field_name: #graphql_name,
+                        target_type: #target_type,
+                        source_column: #source_column,
+                        target_column: #target_column,
+                        is_multiple: #is_multiple,
+                    }
+                });
+            }
+
             // Initialize relation fields to empty
             if is_vec_type(field_type) {
                 from_row_fields.push(quote! { #field_name: Vec::new(), });
@@ -832,6 +864,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
     let order_by_name_str = format!("{}OrderByInput", struct_name);
     let where_input_name = syn::Ident::new(&where_input_name_str, struct_name.span());
     let order_by_name = syn::Ident::new(&order_by_name_str, struct_name.span());
+    let struct_name_str = struct_name.to_string();
 
     // Generate order_by to_sql_order implementation
     let order_by_match_arms: Vec<_> = sortable_columns
@@ -1009,6 +1042,29 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
                     #(#composite_unique_indexes),*
                 ];
                 UNIQUE_INDEXES
+            }
+        }
+
+        impl ::graphql_orm::graphql::orm::EntityRelations for #struct_name {
+            fn relation_metadata() -> &'static [::graphql_orm::graphql::orm::RelationMetadata] {
+                static RELATIONS: &[::graphql_orm::graphql::orm::RelationMetadata] = &[
+                    #(#relation_metadata_defs),*
+                ];
+                RELATIONS
+            }
+        }
+
+        impl ::graphql_orm::graphql::orm::Entity for #struct_name {
+            fn entity_name() -> &'static str {
+                #struct_name_str
+            }
+
+            fn metadata() -> &'static ::graphql_orm::graphql::orm::EntityMetadata {
+                static METADATA: ::std::sync::OnceLock<::graphql_orm::graphql::orm::EntityMetadata> =
+                    ::std::sync::OnceLock::new();
+                METADATA.get_or_init(|| {
+                    ::graphql_orm::graphql::orm::EntityMetadata::from_schema::<Self>(#struct_name_str)
+                })
             }
         }
 
@@ -1897,11 +1953,15 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
         .map(|r| {
             let graphql_name = &r.graphql_name;
             let target_type = &r.target_type_str;
+            let source_column = &r.source_column;
+            let target_column = &r.fk_column;
             let is_multiple = r.is_multiple;
             quote! {
                 ::graphql_orm::graphql::orm::RelationMetadata {
                     field_name: #graphql_name,
                     target_type: #target_type,
+                    source_column: #source_column,
+                    target_column: #target_column,
                     is_multiple: #is_multiple,
                 }
             }
