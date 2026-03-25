@@ -19,6 +19,17 @@ without forcing backend-specific logic into every derive implementation.
 - `?` placeholders
 - SQLite-oriented query construction assumptions
 
+## Current Feature-Flag Coverage
+
+The proc-macro crate now accepts one backend feature at a time:
+
+- `sqlite`
+- `postgres`
+- `mysql`
+- `mssql`
+
+That selection is currently used to emit the backend-specific SQLx pool and row types in generated code. SQL dialect behaviour is not generalized yet, so only the type surface is backend-aware today.
+
 ## Target Abstractions
 
 ### `SqlDialect`

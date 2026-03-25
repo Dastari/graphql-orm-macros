@@ -17,6 +17,74 @@ use syn::{
     parse_macro_input,
 };
 
+#[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "mssql"
+)))]
+compile_error!("Enable exactly one database backend feature: sqlite, postgres, mysql, or mssql.");
+
+#[cfg(any(
+    all(feature = "sqlite", feature = "postgres"),
+    all(feature = "sqlite", feature = "mysql"),
+    all(feature = "sqlite", feature = "mssql"),
+    all(feature = "postgres", feature = "mysql"),
+    all(feature = "postgres", feature = "mssql"),
+    all(feature = "mysql", feature = "mssql")
+))]
+compile_error!("Enable only one database backend feature at a time.");
+
+fn backend_row_type_tokens() -> proc_macro2::TokenStream {
+    if cfg!(feature = "sqlite") {
+        quote! { sqlx::sqlite::SqliteRow }
+    } else if cfg!(feature = "postgres") {
+        quote! { sqlx::postgres::PgRow }
+    } else if cfg!(feature = "mysql") {
+        quote! { sqlx::mysql::MySqlRow }
+    } else if cfg!(feature = "mssql") {
+        quote! { sqlx::mssql::MssqlRow }
+    } else {
+        proc_macro2::TokenStream::new()
+    }
+}
+
+fn backend_pool_type_tokens() -> proc_macro2::TokenStream {
+    if cfg!(feature = "sqlite") {
+        quote! { sqlx::SqlitePool }
+    } else if cfg!(feature = "postgres") {
+        quote! { sqlx::PgPool }
+    } else if cfg!(feature = "mysql") {
+        quote! { sqlx::MySqlPool }
+    } else if cfg!(feature = "mssql") {
+        quote! { sqlx::MssqlPool }
+    } else {
+        proc_macro2::TokenStream::new()
+    }
+}
+
+fn backend_helper_import_tokens() -> proc_macro2::TokenStream {
+    if cfg!(feature = "sqlite") {
+        quote! { use crate::db::sqlite_helpers::*; }
+    } else if cfg!(feature = "postgres") {
+        quote! { use crate::db::postgres_helpers::*; }
+    } else if cfg!(feature = "mysql") {
+        quote! { use crate::db::mysql_helpers::*; }
+    } else if cfg!(feature = "mssql") {
+        quote! { use crate::db::mssql_helpers::*; }
+    } else {
+        proc_macro2::TokenStream::new()
+    }
+}
+
+fn backend_current_epoch_expr() -> &'static str {
+    if cfg!(feature = "postgres") {
+        "(EXTRACT(EPOCH FROM NOW())::bigint)"
+    } else {
+        "(unixepoch())"
+    }
+}
+
 /// Generate a GraphQL mutation result type with success, error, and optional entity field.
 ///
 /// # Usage
@@ -518,6 +586,79 @@ fn maybe_wrap_read_transform(
 
 fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_name = &input.ident;
+    let row_type = backend_row_type_tokens();
+    let helper_import = backend_helper_import_tokens();
+    let placeholder_body = if cfg!(feature = "postgres") {
+        quote! { format!("${}", index) }
+    } else {
+        quote! { "?".to_string() }
+    };
+    let rebind_loop_body = if cfg!(feature = "postgres") {
+        quote! {
+            if chars[i] == '?' {
+                rebound.push_str(&Self::__gom_placeholder(next_index));
+                next_index += 1;
+                i += 1;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+            } else if chars[i] == '$' {
+                rebound.push_str(&Self::__gom_placeholder(next_index));
+                next_index += 1;
+                i += 1;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+            } else {
+                rebound.push(chars[i]);
+                i += 1;
+            }
+        }
+    } else {
+        quote! {
+            if chars[i] == '?' {
+                rebound.push_str(&Self::__gom_placeholder(next_index));
+                next_index += 1;
+                i += 1;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+            } else {
+                rebound.push(chars[i]);
+                i += 1;
+            }
+        }
+    };
+    let ci_like_body = if cfg!(feature = "postgres") {
+        quote! { format!("{} ILIKE {}", column, placeholder) }
+    } else {
+        quote! { format!("LOWER({}) LIKE LOWER({})", column, placeholder) }
+    };
+    let bool_sql_value_body = if cfg!(feature = "postgres") {
+        quote! { crate::graphql::orm::SqlValue::Bool(value) }
+    } else {
+        quote! { crate::graphql::orm::SqlValue::Int(if value { 1 } else { 0 }) }
+    };
+    let current_epoch_runtime = if cfg!(feature = "postgres") {
+        quote! { "EXTRACT(EPOCH FROM NOW())::bigint" }
+    } else {
+        quote! { "unixepoch()" }
+    };
+    let current_date_runtime = if cfg!(feature = "postgres") {
+        quote! { "CURRENT_DATE" }
+    } else {
+        quote! { "date('now')" }
+    };
+    let days_ago_runtime = if cfg!(feature = "postgres") {
+        quote! { format!("(CURRENT_DATE - INTERVAL '{} days')::date", days) }
+    } else {
+        quote! { format!("date('now', '-{} days')", days) }
+    };
+    let days_ahead_runtime = if cfg!(feature = "postgres") {
+        quote! { format!("(CURRENT_DATE + INTERVAL '{} days')::date", days) }
+    } else {
+        quote! { format!("date('now', '+{} days')", days) }
+    };
 
     let data = match &input.data {
         Data::Struct(data) => data,
@@ -626,7 +767,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
         let is_unique = field_meta.unique;
         let sql_type = rust_type_to_sql_type(field_type, &field_meta);
         let default_val = if rust_name == "created_at" || rust_name == "updated_at" {
-            Some("(unixepoch())")
+            Some(backend_current_epoch_expr())
         } else {
             None
         };
@@ -655,8 +796,13 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
 
         // Generate WhereInput field for filterable fields
         if let Some(ref filter_type) = field_meta.filterable {
-            let (input_field, sql_gen) =
-                generate_filter_field(field_name, &graphql_name, &db_col, filter_type)?;
+            let (input_field, sql_gen) = generate_filter_field(
+                struct_name,
+                field_name,
+                &graphql_name,
+                &db_col,
+                filter_type,
+            )?;
             where_input_fields.push(input_field);
             filter_to_sql.push(sql_gen);
         }
@@ -800,6 +946,49 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             }
         }
 
+        impl #struct_name {
+            pub(crate) fn __gom_placeholder(index: usize) -> String {
+                #placeholder_body
+            }
+
+            pub(crate) fn __gom_rebind_sql(sql: &str, start_index: usize) -> String {
+                let mut rebound = String::with_capacity(sql.len() + 16);
+                let chars: Vec<char> = sql.chars().collect();
+                let mut i = 0usize;
+                let mut next_index = start_index;
+
+                while i < chars.len() {
+                    #rebind_loop_body
+                }
+
+                rebound
+            }
+
+            pub(crate) fn __gom_ci_like(column: &str, placeholder: &str) -> String {
+                #ci_like_body
+            }
+
+            pub(crate) fn __gom_bool_sql_value(value: bool) -> crate::graphql::orm::SqlValue {
+                #bool_sql_value_body
+            }
+
+            pub(crate) fn __gom_current_epoch_expr() -> &'static str {
+                #current_epoch_runtime
+            }
+
+            pub(crate) fn __gom_current_date_expr() -> &'static str {
+                #current_date_runtime
+            }
+
+            pub(crate) fn __gom_days_ago_expr(days: i64) -> String {
+                #days_ago_runtime
+            }
+
+            pub(crate) fn __gom_days_ahead_expr(days: i64) -> String {
+                #days_ahead_runtime
+            }
+        }
+
         impl crate::graphql::orm::DatabaseSchema for #struct_name {
             fn columns() -> &'static [crate::graphql::orm::ColumnDef] {
                 static COLUMNS: &[crate::graphql::orm::ColumnDef] = &[
@@ -824,9 +1013,9 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
         }
 
         impl crate::graphql::orm::FromSqlRow for #struct_name {
-            fn from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
+            fn from_row(row: &#row_type) -> Result<Self, sqlx::Error> {
                 use sqlx::Row;
-                use crate::db::sqlite_helpers::*;
+                #helper_import
 
                 Ok(Self {
                     #(#from_row_fields)*
@@ -841,6 +1030,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
 // ============================================================================
 
 fn generate_filter_field(
+    struct_name: &syn::Ident,
     field_name: &syn::Ident,
     graphql_name: &str,
     db_col: &str,
@@ -857,29 +1047,36 @@ fn generate_filter_field(
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
                     if let Some(ref v) = f.eq {
-                        conditions.push(format!("{} = ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} = {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.ne {
-                        conditions.push(format!("{} != ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} != {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.contains {
-                        // Case-insensitive contains using LOWER()
-                        conditions.push(format!("LOWER({}) LIKE LOWER(?)", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(format!("%{}%", v)));
                     }
                     if let Some(ref v) = f.starts_with {
-                        conditions.push(format!("LOWER({}) LIKE LOWER(?)", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(format!("{}%", v)));
                     }
                     if let Some(ref v) = f.ends_with {
-                        conditions.push(format!("LOWER({}) LIKE LOWER(?)", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(format!("%{}", v)));
                     }
                     if let Some(ref list) = f.in_list {
                         if !list.is_empty() {
-                            let placeholders: Vec<&str> = list.iter().map(|_| "?").collect();
+                            let base_index = values.len() + 1;
+                            let placeholders: Vec<String> = (0..list.len())
+                                .map(|offset| #struct_name::__gom_placeholder(base_index + offset))
+                                .collect();
                             conditions.push(format!("{} IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
                                 values.push(crate::graphql::orm::SqlValue::String(v.clone()));
@@ -888,7 +1085,10 @@ fn generate_filter_field(
                     }
                     if let Some(ref list) = f.not_in {
                         if !list.is_empty() {
-                            let placeholders: Vec<&str> = list.iter().map(|_| "?").collect();
+                            let base_index = values.len() + 1;
+                            let placeholders: Vec<String> = (0..list.len())
+                                .map(|offset| #struct_name::__gom_placeholder(base_index + offset))
+                                .collect();
                             conditions.push(format!("{} NOT IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
                                 values.push(crate::graphql::orm::SqlValue::String(v.clone()));
@@ -909,7 +1109,8 @@ fn generate_filter_field(
                         // Use a broad LIKE pattern to get candidates
                         // Fuzzy scoring with strsim happens after fetch
                         let pattern = crate::graphql::orm::generate_candidate_pattern(&sim.value);
-                        conditions.push(format!("LOWER({}) LIKE LOWER(?)", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(pattern));
                     }
                 }
@@ -924,32 +1125,41 @@ fn generate_filter_field(
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
                     if let Some(v) = f.eq {
-                        conditions.push(format!("{} = ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} = {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.ne {
-                        conditions.push(format!("{} != ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} != {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.lt {
-                        conditions.push(format!("{} < ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} < {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.lte {
-                        conditions.push(format!("{} <= ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} <= {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.gt {
-                        conditions.push(format!("{} > ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} > {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.gte {
-                        conditions.push(format!("{} >= ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} >= {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(ref list) = f.in_list {
                         if !list.is_empty() {
-                            let placeholders: Vec<&str> = list.iter().map(|_| "?").collect();
+                            let base_index = values.len() + 1;
+                            let placeholders: Vec<String> = (0..list.len())
+                                .map(|offset| #struct_name::__gom_placeholder(base_index + offset))
+                                .collect();
                             conditions.push(format!("{} IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
                                 values.push(crate::graphql::orm::SqlValue::Int(*v as i64));
@@ -958,7 +1168,10 @@ fn generate_filter_field(
                     }
                     if let Some(ref list) = f.not_in {
                         if !list.is_empty() {
-                            let placeholders: Vec<&str> = list.iter().map(|_| "?").collect();
+                            let base_index = values.len() + 1;
+                            let placeholders: Vec<String> = (0..list.len())
+                                .map(|offset| #struct_name::__gom_placeholder(base_index + offset))
+                                .collect();
                             conditions.push(format!("{} NOT IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
                                 values.push(crate::graphql::orm::SqlValue::Int(*v as i64));
@@ -985,12 +1198,14 @@ fn generate_filter_field(
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
                     if let Some(v) = f.eq {
-                        conditions.push(format!("{} = ?", #db_col));
-                        values.push(crate::graphql::orm::SqlValue::Int(if v { 1 } else { 0 }));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} = {}", #db_col, placeholder));
+                        values.push(#struct_name::__gom_bool_sql_value(v));
                     }
                     if let Some(v) = f.ne {
-                        conditions.push(format!("{} != ?", #db_col));
-                        values.push(crate::graphql::orm::SqlValue::Int(if v { 1 } else { 0 }));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} != {}", #db_col, placeholder));
+                        values.push(#struct_name::__gom_bool_sql_value(v));
                     }
                     // IsNull / IsNotNull
                     if let Some(is_null) = f.is_null {
@@ -1012,32 +1227,40 @@ fn generate_filter_field(
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
                     if let Some(ref v) = f.eq {
-                        conditions.push(format!("{} = ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} = {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.ne {
-                        conditions.push(format!("{} != ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} != {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.lt {
-                        conditions.push(format!("{} < ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} < {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.lte {
-                        conditions.push(format!("{} <= ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} <= {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.gt {
-                        conditions.push(format!("{} > ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} > {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.gte {
-                        conditions.push(format!("{} >= ?", #db_col));
+                        let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                        conditions.push(format!("{} >= {}", #db_col, placeholder));
                         values.push(crate::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref range) = f.between {
-                        if let (Some(ref start), Some(ref end)) = (&range.start, &range.end) {
-                            conditions.push(format!("{} BETWEEN ? AND ?", #db_col));
+                        if let (Some(start), Some(end)) = (&range.start, &range.end) {
+                            let start_placeholder = #struct_name::__gom_placeholder(values.len() + 1);
+                            let end_placeholder = #struct_name::__gom_placeholder(values.len() + 2);
+                            conditions.push(format!("{} BETWEEN {} AND {}", #db_col, start_placeholder, end_placeholder));
                             values.push(crate::graphql::orm::SqlValue::String(start.clone()));
                             values.push(crate::graphql::orm::SqlValue::String(end.clone()));
                         }
@@ -1052,21 +1275,33 @@ fn generate_filter_field(
                     }
                     // Date arithmetic operators
                     if f.in_past == Some(true) {
-                        conditions.push(format!("{} < date('now')", #db_col));
+                        conditions.push(format!("{} < {}", #db_col, #struct_name::__gom_current_date_expr()));
                     }
                     if f.in_future == Some(true) {
-                        conditions.push(format!("{} > date('now')", #db_col));
+                        conditions.push(format!("{} > {}", #db_col, #struct_name::__gom_current_date_expr()));
                     }
                     if f.is_today == Some(true) {
-                        conditions.push(format!("{} = date('now')", #db_col));
+                        conditions.push(format!("{} = {}", #db_col, #struct_name::__gom_current_date_expr()));
                     }
                     if let Some(days) = f.recent_days {
                         // Within the last N days (inclusive of today)
-                        conditions.push(format!("{} >= date('now', '-{} days') AND {} <= date('now')", #db_col, days, #db_col));
+                        conditions.push(format!(
+                            "{} >= {} AND {} <= {}",
+                            #db_col,
+                            #struct_name::__gom_days_ago_expr(days.into()),
+                            #db_col,
+                            #struct_name::__gom_current_date_expr()
+                        ));
                     }
                     if let Some(days) = f.within_days {
                         // Within the next N days (inclusive of today)
-                        conditions.push(format!("{} >= date('now') AND {} <= date('now', '+{} days')", #db_col, #db_col, days));
+                        conditions.push(format!(
+                            "{} >= {} AND {} <= {}",
+                            #db_col,
+                            #struct_name::__gom_current_date_expr(),
+                            #db_col,
+                            #struct_name::__gom_days_ahead_expr(days.into())
+                        ));
                     }
                     if let Some(ref rel) = f.gte_relative {
                         let expr = rel.to_sql_expr();
@@ -1097,6 +1332,30 @@ fn generate_row_field_assignment(
     db_col: &str,
     meta: &FieldMetadata,
 ) -> syn::Result<proc_macro2::TokenStream> {
+    let bool_expr = if cfg!(feature = "postgres") {
+        quote! { row.try_get::<bool, _>(#db_col)? }
+    } else {
+        quote! {{
+            let i: i32 = row.try_get(#db_col)?;
+            int_to_bool(i)
+        }}
+    };
+    let uuid_expr = if cfg!(feature = "postgres") {
+        quote! { row.try_get(#db_col)? }
+    } else {
+        quote! {{
+            let s: String = row.try_get(#db_col)?;
+            str_to_uuid(&s).map_err(|e| sqlx::Error::Decode(e.into()))?
+        }}
+    };
+    let datetime_expr = if cfg!(feature = "postgres") {
+        quote! { row.try_get(#db_col)? }
+    } else {
+        quote! {{
+            let s: String = row.try_get(#db_col)?;
+            str_to_datetime(&s).map_err(|e| sqlx::Error::Decode(e.into()))?
+        }}
+    };
     // Handle special field types
     if meta.is_date_field {
         return Ok(quote! {
@@ -1109,10 +1368,7 @@ fn generate_row_field_assignment(
 
     if meta.is_boolean_field {
         return Ok(quote! {
-            #field_name: {
-                let i: i32 = row.try_get(#db_col)?;
-                int_to_bool(i)
-            },
+            #field_name: #bool_expr,
         });
     }
 
@@ -1150,18 +1406,12 @@ fn generate_row_field_assignment(
                 }
                 "bool" => {
                     return Ok(quote! {
-                        #field_name: {
-                            let i: i32 = row.try_get(#db_col)?;
-                            int_to_bool(i)
-                        },
+                        #field_name: #bool_expr,
                     });
                 }
                 "Uuid" => {
                     return Ok(quote! {
-                        #field_name: {
-                            let s: String = row.try_get(#db_col)?;
-                            str_to_uuid(&s).map_err(|e| sqlx::Error::Decode(e.into()))?
-                        },
+                        #field_name: #uuid_expr,
                     });
                 }
                 "Option" => {
@@ -1189,10 +1439,7 @@ fn generate_row_field_assignment(
                 }
                 "DateTime" => {
                     return Ok(quote! {
-                        #field_name: {
-                            let s: String = row.try_get(#db_col)?;
-                            str_to_datetime(&s).map_err(|e| sqlx::Error::Decode(e.into()))?
-                        },
+                        #field_name: #datetime_expr,
                     });
                 }
                 _ => {}
@@ -1212,6 +1459,34 @@ fn generate_option_row_field_assignment(
     db_col: &str,
     meta: &FieldMetadata,
 ) -> syn::Result<proc_macro2::TokenStream> {
+    let optional_bool_expr = if cfg!(feature = "postgres") {
+        quote! { row.try_get(#db_col)? }
+    } else {
+        quote! {{
+            let i: Option<i32> = row.try_get(#db_col)?;
+            i.map(int_to_bool)
+        }}
+    };
+    let optional_uuid_expr = if cfg!(feature = "postgres") {
+        quote! { row.try_get(#db_col)? }
+    } else {
+        quote! {{
+            let s: Option<String> = row.try_get(#db_col)?;
+            s.map(|s| str_to_uuid(&s))
+                .transpose()
+                .map_err(|e| sqlx::Error::Decode(e.into()))?
+        }}
+    };
+    let optional_datetime_expr = if cfg!(feature = "postgres") {
+        quote! { row.try_get(#db_col)? }
+    } else {
+        quote! {{
+            let s: Option<String> = row.try_get(#db_col)?;
+            s.map(|s| str_to_datetime(&s))
+                .transpose()
+                .map_err(|e| sqlx::Error::Decode(e.into()))?
+        }}
+    };
     if let syn::Type::Path(inner_path) = inner_type {
         if let Some(segment) = inner_path.path.segments.last() {
             let inner_name = segment.ident.to_string();
@@ -1244,30 +1519,17 @@ fn generate_option_row_field_assignment(
                 }
                 "bool" => {
                     return Ok(quote! {
-                        #field_name: {
-                            let i: Option<i32> = row.try_get(#db_col)?;
-                            i.map(int_to_bool)
-                        },
+                        #field_name: #optional_bool_expr,
                     });
                 }
                 "Uuid" => {
                     return Ok(quote! {
-                        #field_name: {
-                            let s: Option<String> = row.try_get(#db_col)?;
-                            s.map(|s| str_to_uuid(&s))
-                                .transpose()
-                                .map_err(|e| sqlx::Error::Decode(e.into()))?
-                        },
+                        #field_name: #optional_uuid_expr,
                     });
                 }
                 "DateTime" => {
                     return Ok(quote! {
-                        #field_name: {
-                            let s: Option<String> = row.try_get(#db_col)?;
-                            s.map(|s| str_to_datetime(&s))
-                                .transpose()
-                                .map_err(|e| sqlx::Error::Decode(e.into()))?
-                        },
+                        #field_name: #optional_datetime_expr,
                     });
                 }
                 "Vec" => {
@@ -1354,7 +1616,7 @@ fn is_bool_type(ty: &syn::Type) -> bool {
     false
 }
 
-/// Convert Rust type to SQLite type string
+/// Convert Rust type to the configured backend SQL type string
 fn rust_type_to_sql_type(ty: &syn::Type, meta: &FieldMetadata) -> &'static str {
     // Handle Option<T> by unwrapping
     let inner_type = if is_option_type(ty) {
@@ -1381,13 +1643,25 @@ fn rust_type_to_sql_type(ty: &syn::Type, meta: &FieldMetadata) -> &'static str {
 
     // Check field metadata first
     if meta.is_boolean_field {
-        return "INTEGER";
+        return if cfg!(feature = "postgres") {
+            "BOOLEAN"
+        } else {
+            "INTEGER"
+        };
     }
     if meta.is_json_field {
-        return "TEXT";
+        return if cfg!(feature = "postgres") {
+            "JSONB"
+        } else {
+            "TEXT"
+        };
     }
     if meta.is_date_field {
-        return "TEXT";
+        return if cfg!(feature = "postgres") {
+            "TIMESTAMPTZ"
+        } else {
+            "TEXT"
+        };
     }
 
     // Infer from Rust type first (so f64 becomes REAL not INTEGER for "number" filter)
@@ -1397,17 +1671,55 @@ fn rust_type_to_sql_type(ty: &syn::Type, meta: &FieldMetadata) -> &'static str {
             match type_name.as_str() {
                 "String" | "str" => return "TEXT",
                 "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => {
-                    return "INTEGER";
+                    return if cfg!(feature = "postgres") {
+                        "BIGINT"
+                    } else {
+                        "INTEGER"
+                    };
                 }
-                "f32" | "f64" => return "REAL",
-                "bool" => return "INTEGER",
+                "f32" | "f64" => {
+                    return if cfg!(feature = "postgres") {
+                        "DOUBLE PRECISION"
+                    } else {
+                        "REAL"
+                    };
+                }
+                "bool" => {
+                    return if cfg!(feature = "postgres") {
+                        "BOOLEAN"
+                    } else {
+                        "INTEGER"
+                    };
+                }
                 "Vec" => {
                     if is_byte_vec_type(inner_type) {
-                        return "BLOB";
+                        return if cfg!(feature = "postgres") {
+                            "BYTEA"
+                        } else {
+                            "BLOB"
+                        };
                     }
-                    return "TEXT";
+                    return if cfg!(feature = "postgres") {
+                        "JSONB"
+                    } else {
+                        "TEXT"
+                    };
                 }
-                _ => return "TEXT", // Default to TEXT for unknown types
+                "Uuid" => {
+                    return if cfg!(feature = "postgres") {
+                        "UUID"
+                    } else {
+                        "TEXT"
+                    };
+                }
+                "DateTime" => {
+                    return if cfg!(feature = "postgres") {
+                        "TIMESTAMPTZ"
+                    } else {
+                        "TEXT"
+                    };
+                }
+                _ => return "TEXT",
             }
         }
     }
@@ -1477,6 +1789,7 @@ fn classify_relation_value_type(ty: &syn::Type) -> Option<(RelationValueKind, bo
 
 fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_name = &input.ident;
+    let pool_type = backend_pool_type_tokens();
 
     let data = match &input.data {
         Data::Struct(data) => data,
@@ -1714,6 +2027,26 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
 
                     let db = ctx.data_unchecked::<crate::db::Database>();
 
+                    if where_input.is_none() && order_by.is_none() && page.is_none() && !self.#field_name.is_empty() {
+                        let entities = self.#field_name.clone();
+                        let edges: Vec<#edge_type> = entities
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, entity)| #edge_type {
+                                cursor: crate::graphql::pagination::encode_cursor(i as i64),
+                                node: entity,
+                            })
+                            .collect();
+                        let page_info = crate::graphql::pagination::PageInfo {
+                            has_next_page: false,
+                            has_previous_page: false,
+                            start_cursor: edges.first().map(|e| e.cursor.clone()),
+                            end_cursor: edges.last().map(|e| e.cursor.clone()),
+                            total_count: Some(edges.len() as i64),
+                        };
+                        return Ok(#connection_type { edges, page_info });
+                    }
+
                     // Check if we can use DataLoader (no filter/sort/pagination args)
                     #source_binding_multiple
 
@@ -1734,7 +2067,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                         // Slow path: Use direct query with full SQL support
                         let mut query = EntityQuery::<#target_type>::new()
                             .where_clause(
-                                &format!("{} = ?", #fk_column),
+                                &format!("{} = {}", #fk_column, #target_type::__gom_placeholder(1)),
                                 relation_sql_value
                             );
 
@@ -1830,6 +2163,10 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                     use crate::graphql::orm::{DatabaseEntity, EntityQuery, SqlValue};
                     use crate::graphql::entities::#target_type;
 
+                    if self.#field_name.is_some() {
+                        return Ok(self.#field_name.clone());
+                    }
+
                     let db = ctx.data_unchecked::<crate::db::Database>();
                     #source_binding_single
 
@@ -1846,7 +2183,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                     } else {
                         EntityQuery::<#target_type>::new()
                             .where_clause(
-                                &format!("{} = ?", #fk_column),
+                                &format!("{} = {}", #fk_column, #target_type::__gom_placeholder(1)),
                                 relation_sql_value
                             )
                             .fetch_one(db)
@@ -1861,9 +2198,169 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
     })
     .collect::<syn::Result<Vec<_>>>()?;
 
-    // Generate simple RelationLoader impl (for backward compatibility)
-    let single_load_blocks: Vec<proc_macro2::TokenStream> = Vec::new();
-    let bulk_load_blocks: Vec<proc_macro2::TokenStream> = Vec::new();
+    let bulk_load_blocks: Vec<proc_macro2::TokenStream> = relations
+        .iter()
+        .map(|r| -> syn::Result<proc_macro2::TokenStream> {
+            let field_name = &r.field_name;
+            let graphql_name = &r.graphql_name;
+            let fk_column = &r.fk_column;
+            let source_column = &r.source_column;
+            let source_field = syn::Ident::new(source_column, struct_name.span());
+            let target_type = syn::Ident::new(&r.target_type_str, struct_name.span());
+            let source_ty = &r.source_field_ty;
+
+            let (source_kind, source_is_option) =
+                classify_relation_value_type(source_ty).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        source_ty,
+                        format!(
+                            "Unsupported relation source field type for '{}.{}': expected String/int/float/bool (optionals allowed)",
+                            struct_name, field_name
+                        ),
+                    )
+                })?;
+
+            let key_string_expr = match source_kind {
+                RelationValueKind::String => quote! { value.clone() },
+                _ => quote! { value.to_string() },
+            };
+            let sql_value_expr = match source_kind {
+                RelationValueKind::String => {
+                    quote! { crate::graphql::orm::SqlValue::String(value.clone()) }
+                }
+                RelationValueKind::Int => {
+                    quote! { crate::graphql::orm::SqlValue::Int((*value) as i64) }
+                }
+                RelationValueKind::Float => {
+                    quote! { crate::graphql::orm::SqlValue::Float((*value).into()) }
+                }
+                RelationValueKind::Bool => {
+                    quote! { crate::graphql::orm::SqlValue::Bool(*value) }
+                }
+            };
+
+            let entity_key_pair_expr = if source_is_option {
+                quote! {
+                    entity.#source_field.as_ref().map(|value| {
+                        (#key_string_expr, #sql_value_expr)
+                    })
+                }
+            } else {
+                quote! {
+                    {
+                        let value = &entity.#source_field;
+                        Some((#key_string_expr, #sql_value_expr))
+                    }
+                }
+            };
+
+            let assign_expr = if source_is_option {
+                if r.is_multiple {
+                    quote! {
+                        if let Some(value) = entity.#source_field.as_ref() {
+                            let value = value;
+                            let relation_key = #key_string_expr;
+                            entity.#field_name = grouped.remove(&relation_key).unwrap_or_default();
+                        } else {
+                            entity.#field_name = Vec::new();
+                        }
+                    }
+                } else {
+                    quote! {
+                        if let Some(value) = entity.#source_field.as_ref() {
+                            let value = value;
+                            let relation_key = #key_string_expr;
+                            entity.#field_name = grouped.remove(&relation_key);
+                        } else {
+                            entity.#field_name = None;
+                        }
+                    }
+                }
+            } else if r.is_multiple {
+                quote! {
+                    let value = &entity.#source_field;
+                    let relation_key = #key_string_expr;
+                    entity.#field_name = grouped.remove(&relation_key).unwrap_or_default();
+                }
+            } else {
+                quote! {
+                    let value = &entity.#source_field;
+                    let relation_key = #key_string_expr;
+                    entity.#field_name = grouped.remove(&relation_key);
+                }
+            };
+
+            let grouped_type = if r.is_multiple {
+                quote! { std::collections::HashMap<String, Vec<crate::graphql::entities::#target_type>> }
+            } else {
+                quote! { std::collections::HashMap<String, crate::graphql::entities::#target_type> }
+            };
+
+            let insert_grouped = if r.is_multiple {
+                quote! {
+                    grouped.entry(relation_key).or_default().push(related);
+                }
+            } else {
+                quote! {
+                    grouped.entry(relation_key).or_insert(related);
+                }
+            };
+
+            Ok(quote! {
+                if Self::__gom_selection_contains(selection, #graphql_name) {
+                    let mut unique_relation_keys: Vec<(String, crate::graphql::orm::SqlValue)> = Vec::new();
+                    let mut seen_relation_keys = std::collections::HashSet::new();
+
+                    for entity in entities.iter() {
+                        if let Some((relation_key, relation_value)) = #entity_key_pair_expr {
+                            if seen_relation_keys.insert(relation_key.clone()) {
+                                unique_relation_keys.push((relation_key, relation_value));
+                            }
+                        }
+                    }
+
+                    let mut grouped: #grouped_type = std::collections::HashMap::new();
+
+                    if !unique_relation_keys.is_empty() {
+                        let placeholders = (0..unique_relation_keys.len())
+                            .map(|index| <crate::graphql::entities::#target_type>::__gom_placeholder(index + 1))
+                            .collect::<Vec<_>>();
+                        let sql = format!(
+                            "SELECT {}, CAST({} AS TEXT) AS __gom_relation_key FROM {} WHERE {} IN ({})",
+                            <crate::graphql::entities::#target_type as crate::graphql::orm::DatabaseEntity>::column_names().join(", "),
+                            #fk_column,
+                            <crate::graphql::entities::#target_type as crate::graphql::orm::DatabaseEntity>::TABLE_NAME,
+                            #fk_column,
+                            placeholders.join(", ")
+                        );
+
+                        let mut query = sqlx::query(&sql);
+                        for (_, value) in &unique_relation_keys {
+                            query = match value {
+                                crate::graphql::orm::SqlValue::String(value) => query.bind(value),
+                                crate::graphql::orm::SqlValue::Int(value) => query.bind(*value),
+                                crate::graphql::orm::SqlValue::Float(value) => query.bind(*value),
+                                crate::graphql::orm::SqlValue::Bool(value) => query.bind(*value),
+                                crate::graphql::orm::SqlValue::Null => query.bind(Option::<String>::None),
+                            };
+                        }
+
+                        let rows = query.fetch_all(pool).await?;
+                        for row in rows {
+                            use sqlx::Row;
+                            let relation_key: String = row.try_get("__gom_relation_key")?;
+                            let related = <crate::graphql::entities::#target_type as crate::graphql::orm::FromSqlRow>::from_row(&row)?;
+                            #insert_grouped
+                        }
+                    }
+
+                    for entity in entities.iter_mut() {
+                        #assign_expr
+                    }
+                }
+            })
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
 
     let struct_name_str = struct_name.to_string();
     let has_relations = !relations.is_empty();
@@ -1884,16 +2381,15 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
         impl crate::graphql::orm::RelationLoader for #struct_name {
             async fn load_relations(
                 &mut self,
-                pool: &sqlx::SqlitePool,
+                pool: &#pool_type,
                 selection: &[async_graphql::context::SelectionField<'_>],
             ) -> Result<(), sqlx::Error> {
-                #(#single_load_blocks)*
-                Ok(())
+                Self::bulk_load_relations(std::slice::from_mut(self), pool, selection).await
             }
 
             async fn bulk_load_relations(
                 entities: &mut [Self],
-                pool: &sqlx::SqlitePool,
+                pool: &#pool_type,
                 selection: &[async_graphql::context::SelectionField<'_>],
             ) -> Result<(), sqlx::Error> {
                 #(#bulk_load_blocks)*
@@ -1902,6 +2398,19 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
         }
 
         impl #struct_name {
+            fn __gom_selection_contains(
+                selection: &[async_graphql::context::SelectionField<'_>],
+                target: &str,
+            ) -> bool {
+                selection.iter().any(|field| {
+                    field.name() == target
+                        || {
+                            let children = field.selection_set().collect::<Vec<_>>();
+                            Self::__gom_selection_contains(&children, target)
+                        }
+                })
+            }
+
             /// Get relation metadata for look_ahead traversal
             pub fn relation_metadata() -> &'static [crate::graphql::orm::RelationMetadata] {
                 static RELATIONS: &[crate::graphql::orm::RelationMetadata] = &[
@@ -1969,6 +2478,7 @@ pub fn derive_graphql_operations(input: TokenStream) -> TokenStream {
 fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let struct_name = &input.ident;
     let struct_name_str = struct_name.to_string();
+    let pool_type = backend_pool_type_tokens();
 
     let data = match &input.data {
         Data::Struct(data) => data,
@@ -2000,7 +2510,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
     // Generate optional post-mutation hook code if a hook path is configured.
     //
     // Expected signature:
-    // `async fn(&async_graphql::Context<'_>, &sqlx::SqlitePool, &#Entity, ChangeAction)
+    // `async fn(&async_graphql::Context<'_>, &#pool_type, &#Entity, ChangeAction)
     //      -> async_graphql::Result<()>`
     let notify_handler_path = if let Some(ref notify_handler) = entity_meta.notify_handler {
         Some(syn::parse_str::<syn::Path>(notify_handler).map_err(|_| {
@@ -2139,13 +2649,13 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 if is_option_type(field_type) {
                     insert_binds.push(quote! {
                         match input.#field_name {
-                            Some(b) => bind_values.push(crate::graphql::orm::SqlValue::Int(if b { 1 } else { 0 })),
+                            Some(b) => bind_values.push(#struct_name::__gom_bool_sql_value(b)),
                             None => bind_values.push(crate::graphql::orm::SqlValue::Null),
                         }
                     });
                 } else {
                     insert_binds.push(quote! {
-                        bind_values.push(crate::graphql::orm::SqlValue::Int(if input.#field_name { 1 } else { 0 }));
+                        bind_values.push(#struct_name::__gom_bool_sql_value(input.#field_name));
                     });
                 }
             } else if meta.is_json_field
@@ -2221,7 +2731,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                         if let Some(ref val) = input.#field_name {
                             set_clauses.push(format!("{} = ?", #db_col));
                             match val {
-                                Some(b) => values.push(crate::graphql::orm::SqlValue::Int(if *b { 1 } else { 0 })),
+                                Some(b) => values.push(#struct_name::__gom_bool_sql_value(*b)),
                                 None => values.push(crate::graphql::orm::SqlValue::Null),
                             }
                         }
@@ -2231,7 +2741,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     update_field_checks.push(quote! {
                         if let Some(ref val) = input.#field_name {
                             set_clauses.push(format!("{} = ?", #db_col));
-                            values.push(crate::graphql::orm::SqlValue::Int(if *val { 1 } else { 0 }));
+                            values.push(#struct_name::__gom_bool_sql_value(*val));
                         }
                     });
                 }
@@ -2372,6 +2882,53 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
     let update_input_str = format!("Update{}Input", struct_name);
     let result_type_str = format!("{}Result", struct_name);
     let changed_event_str = format!("{}ChangedEvent", struct_name);
+    let has_relations = fields.iter().filter_map(|f| parse_field_metadata(f).ok()).any(|m| m.is_relation);
+    let relation_preload_list = if has_relations {
+        quote! {
+            let selection = ctx.field().selection_set().collect::<Vec<_>>();
+            if !generic_conn.edges.is_empty() {
+                let cursors = generic_conn
+                    .edges
+                    .iter()
+                    .map(|edge| edge.cursor.clone())
+                    .collect::<Vec<_>>();
+                let mut entities = std::mem::take(&mut generic_conn.edges)
+                    .into_iter()
+                    .map(|edge| edge.node)
+                    .collect::<Vec<_>>();
+                <#struct_name as crate::graphql::orm::RelationLoader>::bulk_load_relations(
+                    &mut entities,
+                    pool,
+                    &selection,
+                )
+                .await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                generic_conn.edges = cursors
+                    .into_iter()
+                    .zip(entities.into_iter())
+                    .map(|(cursor, node)| crate::graphql::pagination::Edge { cursor, node })
+                    .collect();
+            }
+        }
+    } else {
+        quote! {}
+    };
+    let relation_preload_single = if has_relations {
+        quote! {
+            if let Some(entity) = entity.as_mut() {
+                let selection = ctx.field().selection_set().collect::<Vec<_>>();
+                <#struct_name as crate::graphql::orm::RelationLoader>::load_relations(
+                    entity,
+                    pool,
+                    &selection,
+                )
+                .await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     // Generate match arms for searchable fields (used in search_similar)
     let searchable_field_arms: Vec<proc_macro2::TokenStream> = string_filterable_fields
@@ -2587,8 +3144,10 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     query = query.paginate(p);
                 }
 
-                let generic_conn = query.fetch_connection(pool).await
+                let mut generic_conn = query.fetch_connection(pool).await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                #relation_preload_list
 
                 Ok(#connection_type::from_generic(generic_conn))
             }
@@ -2608,11 +3167,16 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 let pool = db.pool();
 
                 let pk_col = #struct_name::PRIMARY_KEY;
-                let entity = EntityQuery::<#struct_name>::new()
-                    .where_clause(&format!("{} = ?", pk_col), SqlValue::String(id.to_string()))
+                let mut entity = EntityQuery::<#struct_name>::new()
+                    .where_clause(
+                        &format!("{} = {}", pk_col, #struct_name::__gom_placeholder(1)),
+                        SqlValue::String(id.to_string())
+                    )
                     .fetch_one(pool)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                #relation_preload_single
 
                 Ok(entity)
             }
@@ -2643,7 +3207,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 let pool = db.pool();
 
                 #created_pk_init
-                let sql: String = #insert_sql.to_string();
+                let sql = #struct_name::__gom_rebind_sql(#insert_sql, 1);
 
                 // Collect all values first
                 let mut bind_values: Vec<crate::graphql::orm::SqlValue> = Vec::new();
@@ -2658,7 +3222,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                         // Fetch the created entity
                         let entity = EntityQuery::<#struct_name>::new()
                             .where_clause(
-                                &format!("{} = ?", #struct_name::PRIMARY_KEY),
+                                &format!("{} = {}", #struct_name::PRIMARY_KEY, #struct_name::__gom_placeholder(1)),
                                 SqlValue::String(created_pk.clone())
                             )
                             .fetch_one(pool)
@@ -2707,19 +3271,19 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
 
                 // Update timestamp column when this entity defines one
                 if #has_updated_at_column {
-                    set_clauses.push("updated_at = unixepoch()".to_string());
+                    set_clauses.push(format!("updated_at = {}", #struct_name::__gom_current_epoch_expr()));
                 }
 
                 if set_clauses.is_empty() {
                     return Ok(#result_type::err("No fields to update"));
                 }
 
-                let sql = format!(
+                let sql = #struct_name::__gom_rebind_sql(&format!(
                     "UPDATE {} SET {} WHERE {} = ?",
                     #table_name,
                     set_clauses.join(", "),
                     #struct_name::PRIMARY_KEY
-                );
+                ), 1);
 
                 // Add the ID to the values for the WHERE clause
                 values.push(SqlValue::String(id.to_string()));
@@ -2730,7 +3294,10 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     Ok(r) if r.rows_affected() > 0 => {
                         // Fetch the updated entity
                         let entity = EntityQuery::<#struct_name>::new()
-                            .where_clause(&format!("{} = ?", #struct_name::PRIMARY_KEY), SqlValue::String(id.to_string()))
+                            .where_clause(
+                                &format!("{} = {}", #struct_name::PRIMARY_KEY, #struct_name::__gom_placeholder(1)),
+                                SqlValue::String(id.to_string())
+                            )
                             .fetch_one(pool)
                             .await
                             .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -2775,7 +3342,10 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
 
                 // Fetch entity before deletion for notification purposes
                 let entity = EntityQuery::<#struct_name>::new()
-                    .where_clause(&format!("{} = ?", #struct_name::PRIMARY_KEY), SqlValue::String(id.to_string()))
+                    .where_clause(
+                        &format!("{} = {}", #struct_name::PRIMARY_KEY, #struct_name::__gom_placeholder(1)),
+                        SqlValue::String(id.to_string())
+                    )
                     .fetch_one(pool)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
@@ -2785,12 +3355,12 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 }
                 let entity = entity.unwrap();
 
-                let sql = format!("DELETE FROM {} WHERE {} = ?", #table_name, #struct_name::PRIMARY_KEY);
-
-                let result = sqlx::query(&sql)
-                    .bind(&id.to_string())
-                    .execute(pool)
-                    .await;
+                let sql = #struct_name::__gom_rebind_sql(
+                    &format!("DELETE FROM {} WHERE {} = ?", #table_name, #struct_name::PRIMARY_KEY),
+                    1
+                );
+                let values = vec![SqlValue::String(id.to_string())];
+                let result = crate::graphql::orm::execute_with_binds(&sql, &values, pool).await;
 
                 match result {
                     Ok(r) if r.rows_affected() > 0 => {
@@ -2845,7 +3415,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
 
                 // Update timestamp column when this entity defines one
                 if #has_updated_at_column {
-                    set_clauses.push("updated_at = unixepoch()".to_string());
+                    set_clauses.push(format!("updated_at = {}", #struct_name::__gom_current_epoch_expr()));
                 }
 
                 if set_clauses.is_empty() {
@@ -2856,29 +3426,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 let query = EntityQuery::<#struct_name>::new().filter(filter);
                 let (delete_sql, filter_values) = query.build_delete_sql();
                 let where_clause = match delete_sql.split_once(" WHERE ") {
-                    Some((_, clause)) => {
-                        // EntityQuery filter SQL uses indexed SQLite placeholders (?1, ?2, ...).
-                        // For bulk UPDATE, we prepend SET bind values first, so re-indexed placeholders
-                        // can point at the wrong values (e.g. ?1 resolving to first SET value).
-                        // Normalize indexed placeholders back to positional '?' so bind order is
-                        // strictly values (SET...) then filter_values (WHERE...).
-                        let mut normalized = String::with_capacity(clause.len());
-                        let chars: Vec<char> = clause.chars().collect();
-                        let mut i = 0usize;
-                        while i < chars.len() {
-                            if chars[i] == '?' {
-                                normalized.push('?');
-                                i += 1;
-                                while i < chars.len() && chars[i].is_ascii_digit() {
-                                    i += 1;
-                                }
-                            } else {
-                                normalized.push(chars[i]);
-                                i += 1;
-                            }
-                        }
-                        normalized
-                    }
+                    Some((_, clause)) => #struct_name::__gom_rebind_sql(clause, values.len() + 1),
                     None => return Ok(#update_many_result_type::err("Where filter produced empty SQL")),
                 };
 
@@ -2919,6 +3467,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
 
                 let mut query = EntityQuery::<#struct_name>::new().filter(filter);
                 let (sql, values) = query.build_delete_sql();
+                let sql = #struct_name::__gom_rebind_sql(&sql, 1);
 
                 let result = crate::graphql::orm::execute_with_binds(&sql, &values, pool).await;
 
@@ -2988,13 +3537,13 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         impl #struct_name {
             /// Insert a new entity record using the generated create input.
             pub async fn insert(
-                pool: &sqlx::SqlitePool,
+                pool: &#pool_type,
                 input: #create_input,
             ) -> Result<Self, sqlx::Error> {
                 use crate::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
                 #created_pk_init
-                let sql: String = #insert_sql.to_string();
+                let sql = Self::__gom_rebind_sql(#insert_sql, 1);
 
                 let mut bind_values: Vec<crate::graphql::orm::SqlValue> = Vec::new();
                 #prepend_pk_bind
@@ -3004,7 +3553,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
 
                 EntityQuery::<Self>::new()
                     .where_clause(
-                        &format!("{} = ?", <Self as DatabaseEntity>::PRIMARY_KEY),
+                        &format!("{} = {}", <Self as DatabaseEntity>::PRIMARY_KEY, Self::__gom_placeholder(1)),
                         SqlValue::String(created_pk),
                     )
                     .fetch_one(pool)
@@ -3013,22 +3562,25 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             }
 
             /// Find all entities matching the given filter
-            pub fn query<'a>(pool: &'a sqlx::SqlitePool) -> crate::graphql::orm::FindQuery<'a, Self, #where_input, #order_by_input> {
+            pub fn query<'a>(pool: &'a #pool_type) -> crate::graphql::orm::FindQuery<'a, Self, #where_input, #order_by_input> {
                 crate::graphql::orm::FindQuery::new(pool)
             }
 
             /// Find entity by ID
-            pub async fn get(pool: &sqlx::SqlitePool, id: &str) -> Result<Option<Self>, sqlx::Error> {
+            pub async fn get(pool: &#pool_type, id: &str) -> Result<Option<Self>, sqlx::Error> {
                 use crate::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
                 EntityQuery::<Self>::new()
-                    .where_clause(&format!("{} = ?", <Self as DatabaseEntity>::PRIMARY_KEY), SqlValue::String(id.to_string()))
+                    .where_clause(
+                        &format!("{} = {}", <Self as DatabaseEntity>::PRIMARY_KEY, Self::__gom_placeholder(1)),
+                        SqlValue::String(id.to_string())
+                    )
                     .fetch_one(pool)
                     .await
             }
 
             /// Count entities matching the given filter
-            pub fn count_query<'a>(pool: &'a sqlx::SqlitePool) -> crate::graphql::orm::CountQuery<'a, #where_input> {
+            pub fn count_query<'a>(pool: &'a #pool_type) -> crate::graphql::orm::CountQuery<'a, #where_input> {
                 use crate::graphql::orm::DatabaseEntity;
                 crate::graphql::orm::CountQuery::new(pool, <Self as DatabaseEntity>::TABLE_NAME)
             }
@@ -3065,7 +3617,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             /// }
             /// ```
             pub async fn search_similar(
-                pool: &sqlx::SqlitePool,
+                pool: &#pool_type,
                 field: &str,
                 query: &str,
                 threshold: f64,

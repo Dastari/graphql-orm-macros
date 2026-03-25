@@ -53,7 +53,14 @@ cargo check
 - `mysql`
 - `mssql`
 
-These are scaffolding flags at the moment. Backend-specific behavior still needs to be extracted from the generated code and host integration layer.
+Exactly one backend flag must be enabled at a time. The selected flag now controls the generated SQLx pool and row types:
+
+- `sqlite` -> `sqlx::SqlitePool`, `sqlx::sqlite::SqliteRow`
+- `postgres` -> `sqlx::PgPool`, `sqlx::postgres::PgRow`
+- `mysql` -> `sqlx::MySqlPool`, `sqlx::mysql::MySqlRow`
+- `mssql` -> `sqlx::MssqlPool`, `sqlx::mssql::MssqlRow`
+
+The broader SQL generation is still SQLite-oriented for now, so non-SQLite backends should be treated as early compile-surface support rather than full dialect support.
 
 ## License
 
