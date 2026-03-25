@@ -104,7 +104,7 @@ fn backend_current_epoch_expr() -> &'static str {
 /// For `mutation_result!(CreateResult, entity: Entity)`:
 ///
 /// ```ignore
-/// #[derive(Debug, Clone, async_graphql::SimpleObject)]
+/// #[derive(Debug, Clone, ::graphql_orm::async_graphql::SimpleObject)]
 /// pub struct CreateResult {
 ///     pub success: bool,
 ///     pub error: Option<String>,
@@ -129,7 +129,7 @@ pub fn mutation_result(input: TokenStream) -> TokenStream {
     if let Some((field_name, field_type)) = parsed.field {
         // Result with entity field
         let output = quote! {
-            #[derive(Debug, Clone, async_graphql::SimpleObject)]
+            #[derive(Debug, Clone, ::graphql_orm::async_graphql::SimpleObject)]
             pub struct #struct_name {
                 pub success: bool,
                 pub error: Option<String>,
@@ -158,7 +158,7 @@ pub fn mutation_result(input: TokenStream) -> TokenStream {
     } else {
         // Simple result (no entity field)
         let output = quote! {
-            #[derive(Debug, Clone, async_graphql::SimpleObject)]
+            #[derive(Debug, Clone, ::graphql_orm::async_graphql::SimpleObject)]
             pub struct #struct_name {
                 pub success: bool,
                 pub error: Option<String>,
@@ -534,7 +534,7 @@ fn to_snake_case(s: &str) -> String {
 /// Wrap a value expression with an async, context-aware write transform.
 ///
 /// The transform function must have the signature:
-///   `async fn(&async_graphql::Context<'_>, String) -> async_graphql::Result<String>`
+///   `async fn(&::graphql_orm::async_graphql::Context<'_>, String) -> ::graphql_orm::async_graphql::Result<String>`
 ///
 /// If `transform_write` is None, returns the original expression unchanged.
 fn maybe_wrap_write_transform(
@@ -848,7 +848,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
 
     Ok(quote! {
         // WhereInput for filtering
-        #[derive(async_graphql::InputObject, Default, Clone, Debug)]
+        #[derive(::graphql_orm::async_graphql::InputObject, Default, Clone, Debug)]
         #[graphql(name = #where_input_name_str)]
         pub struct #where_input_name {
             #(#where_input_fields)*
@@ -867,7 +867,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
         }
 
         // OrderByInput for sorting
-        #[derive(async_graphql::InputObject, Default, Clone, Debug)]
+        #[derive(::graphql_orm::async_graphql::InputObject, Default, Clone, Debug)]
         #[graphql(name = #order_by_name_str)]
         pub struct #order_by_name {
             #(#order_by_fields)*
@@ -2015,11 +2015,11 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 #[graphql(name = #graphql_name)]
                 async fn #field_name(
                     &self,
-                    ctx: &async_graphql::Context<'_>,
+                    ctx: &::graphql_orm::async_graphql::Context<'_>,
                     #[graphql(name = "Where")] where_input: Option<#where_input>,
                     #[graphql(name = "OrderBy")] order_by: Option<#order_by_input>,
                     #[graphql(name = "Page")] page: Option<::graphql_orm::graphql::orm::PageInput>,
-                ) -> async_graphql::Result<#connection_type> {
+                ) -> ::graphql_orm::async_graphql::Result<#connection_type> {
                     use ::graphql_orm::graphql::orm::{DatabaseEntity, DatabaseFilter, DatabaseOrderBy, EntityQuery, SqlValue};
 
                     let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
@@ -2052,13 +2052,13 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                     let entities: Vec<#target_type> = if use_dataloader {
                         // Fast path: Use DataLoader for batched loading
                         use ::graphql_orm::graphql::loaders::RelationLoader;
-                        use async_graphql::dataloader::DataLoader;
+                        use ::graphql_orm::async_graphql::dataloader::DataLoader;
 
                         let loader = ctx.data_unchecked::<DataLoader<RelationLoader<#target_type>>>();
                         loader
                             .load_one(relation_loader_key)
                             .await
-                            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                            .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?
                             .unwrap_or_default()
                     } else {
                         // Slow path: Use direct query with full SQL support
@@ -2089,13 +2089,13 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                         let total = query
                             .count(db)
                             .await
-                            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                            .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
 
                         let offset = page.as_ref().map(|p| p.offset()).unwrap_or(0) as usize;
 
                         let entities = query.fetch_all(db)
                             .await
-                            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                            .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
 
                         let has_next_page = (offset as i64 + entities.len() as i64) < total;
                         let has_previous_page = offset > 0;
@@ -2155,8 +2155,8 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 #[graphql(name = #graphql_name)]
                 async fn #field_name(
                     &self,
-                    ctx: &async_graphql::Context<'_>,
-                ) -> async_graphql::Result<Option<#target_type>> {
+                    ctx: &::graphql_orm::async_graphql::Context<'_>,
+                ) -> ::graphql_orm::async_graphql::Result<Option<#target_type>> {
                     use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, SqlValue};
 
                     if self.#field_name.is_some() {
@@ -2168,13 +2168,13 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
 
                     let result = if #source_supports_dataloader {
                         use ::graphql_orm::graphql::loaders::RelationLoader;
-                        use async_graphql::dataloader::DataLoader;
+                        use ::graphql_orm::async_graphql::dataloader::DataLoader;
 
                         let loader = ctx.data_unchecked::<DataLoader<RelationLoader<#target_type>>>();
                         loader
                             .load_one(relation_loader_key)
                             .await
-                            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                            .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?
                             .and_then(|mut entities| entities.drain(..).next())
                     } else {
                         EntityQuery::<#target_type>::new()
@@ -2184,7 +2184,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                             )
                             .fetch_one(db)
                             .await
-                            .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                            .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?
                     };
 
                     Ok(result)
@@ -2364,7 +2364,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
     // Only generate ComplexObject impl if there are relations
     let complex_object_impl = if has_relations {
         quote! {
-            #[async_graphql::ComplexObject]
+            #[::graphql_orm::async_graphql::ComplexObject]
             impl #struct_name {
                 #(#relation_resolvers)*
             }
@@ -2378,7 +2378,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             async fn load_relations(
                 &mut self,
                 pool: &#pool_type,
-                selection: &[async_graphql::context::SelectionField<'_>],
+                selection: &[::graphql_orm::async_graphql::context::SelectionField<'_>],
             ) -> Result<(), ::graphql_orm::sqlx::Error> {
                 Self::bulk_load_relations(std::slice::from_mut(self), pool, selection).await
             }
@@ -2386,7 +2386,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             async fn bulk_load_relations(
                 entities: &mut [Self],
                 pool: &#pool_type,
-                selection: &[async_graphql::context::SelectionField<'_>],
+                selection: &[::graphql_orm::async_graphql::context::SelectionField<'_>],
             ) -> Result<(), ::graphql_orm::sqlx::Error> {
                 #(#bulk_load_blocks)*
                 Ok(())
@@ -2395,7 +2395,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
 
         impl #struct_name {
             fn __gom_selection_contains(
-                selection: &[async_graphql::context::SelectionField<'_>],
+                selection: &[::graphql_orm::async_graphql::context::SelectionField<'_>],
                 target: &str,
             ) -> bool {
                 selection.iter().any(|field| {
@@ -2506,8 +2506,8 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
     // Generate optional post-mutation hook code if a hook path is configured.
     //
     // Expected signature:
-    // `async fn(&async_graphql::Context<'_>, &#pool_type, &#Entity, ChangeAction)
-    //      -> async_graphql::Result<()>`
+    // `async fn(&::graphql_orm::async_graphql::Context<'_>, &#pool_type, &#Entity, ChangeAction)
+    //      -> ::graphql_orm::async_graphql::Result<()>`
     let notify_handler_path = if let Some(ref notify_handler) = entity_meta.notify_handler {
         Some(syn::parse_str::<syn::Path>(notify_handler).map_err(|_| {
             syn::Error::new(
@@ -2898,7 +2898,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     &selection,
                 )
                 .await
-                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
                 generic_conn.edges = cursors
                     .into_iter()
                     .zip(entities.into_iter())
@@ -2919,7 +2919,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     &selection,
                 )
                 .await
-                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
             }
         }
     } else {
@@ -2960,7 +2960,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         // ============================================================================
 
         /// Edge containing a node and cursor
-        #[derive(async_graphql::SimpleObject, Debug, Clone)]
+        #[derive(::graphql_orm::async_graphql::SimpleObject, Debug, Clone)]
         #[graphql(name = #edge_type_str)]
         pub struct #edge_type {
             /// The item at the end of the edge
@@ -2972,7 +2972,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         }
 
         /// Connection containing edges and page info
-        #[derive(async_graphql::SimpleObject, Debug, Clone)]
+        #[derive(::graphql_orm::async_graphql::SimpleObject, Debug, Clone)]
         #[graphql(name = #connection_type_str)]
         pub struct #connection_type {
             /// The edges in this connection
@@ -3009,21 +3009,21 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         // ============================================================================
 
         /// Input for creating a new #struct_name
-        #[derive(async_graphql::InputObject, Clone, Debug)]
+        #[derive(::graphql_orm::async_graphql::InputObject, Clone, Debug)]
         #[graphql(name = #create_input_str)]
         pub struct #create_input {
             #(#create_input_fields)*
         }
 
         /// Input for updating an existing #struct_name
-        #[derive(async_graphql::InputObject, Clone, Debug, Default)]
+        #[derive(::graphql_orm::async_graphql::InputObject, Clone, Debug, Default)]
         #[graphql(name = #update_input_str)]
         pub struct #update_input {
             #(#update_input_fields)*
         }
 
         /// Result type for #struct_name mutations
-        #[derive(Debug, Clone, async_graphql::SimpleObject)]
+        #[derive(Debug, Clone, ::graphql_orm::async_graphql::SimpleObject)]
         #[graphql(name = #result_type_str)]
         pub struct #result_type {
             #[graphql(name = "Success")]
@@ -3046,7 +3046,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         }
 
         /// Event for #struct_name changes (subscriptions)
-        #[derive(Debug, Clone, async_graphql::SimpleObject, serde::Serialize, serde::Deserialize)]
+        #[derive(Debug, Clone, ::graphql_orm::async_graphql::SimpleObject, serde::Serialize, serde::Deserialize)]
         #[graphql(name = #changed_event_str)]
         pub struct #changed_event {
             #[graphql(name = "Action")]
@@ -3058,7 +3058,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         }
 
         /// Result of bulk delete by Where filter
-        #[derive(Debug, Clone, async_graphql::SimpleObject)]
+        #[derive(Debug, Clone, ::graphql_orm::async_graphql::SimpleObject)]
         #[graphql(name = #delete_many_result_type_str)]
         pub struct #delete_many_result_type {
             pub success: bool,
@@ -3077,7 +3077,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         }
 
         /// Result of bulk update by Where filter
-        #[derive(Debug, Clone, async_graphql::SimpleObject)]
+        #[derive(Debug, Clone, ::graphql_orm::async_graphql::SimpleObject)]
         #[graphql(name = #update_many_result_type_str)]
         pub struct #update_many_result_type {
             pub success: bool,
@@ -3102,17 +3102,17 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         #[derive(Default)]
         pub struct #queries_struct;
 
-        #[async_graphql::Object]
+        #[::graphql_orm::async_graphql::Object]
         impl #queries_struct {
             /// Get a list of #plural_name with optional filtering, sorting, and pagination
             #[graphql(name = #list_query_name)]
             async fn list(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Where")] where_input: Option<#where_input>,
                 #[graphql(name = "OrderBy")] order_by: Option<Vec<#order_by_input>>,
                 #[graphql(name = "Page")] page: Option<::graphql_orm::graphql::orm::PageInput>,
-            ) -> async_graphql::Result<#connection_type> {
+            ) -> ::graphql_orm::async_graphql::Result<#connection_type> {
                 use ::graphql_orm::graphql::orm::{DatabaseEntity, DatabaseFilter, DatabaseOrderBy, EntityQuery, FromSqlRow};
                 use ::graphql_orm::graphql::auth::AuthExt;
 
@@ -3141,7 +3141,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 }
 
                 let mut generic_conn = query.fetch_connection(pool).await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
 
                 #relation_preload_list
 
@@ -3152,9 +3152,9 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             #[graphql(name = #single_query_name)]
             async fn get_by_id(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Id")] id: #pk_type,
-            ) -> async_graphql::Result<Option<#struct_name>> {
+            ) -> ::graphql_orm::async_graphql::Result<Option<#struct_name>> {
                 use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
                 use ::graphql_orm::graphql::auth::AuthExt;
 
@@ -3170,7 +3170,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     )
                     .fetch_one(pool)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
 
                 #relation_preload_single
 
@@ -3186,15 +3186,15 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         #[derive(Default)]
         pub struct #mutations_struct;
 
-        #[async_graphql::Object]
+        #[::graphql_orm::async_graphql::Object]
         impl #mutations_struct {
             /// Create a new #struct_name_str
             #[graphql(name = #create_mutation_name)]
             async fn create(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Input")] input: #create_input,
-            ) -> async_graphql::Result<#result_type> {
+            ) -> ::graphql_orm::async_graphql::Result<#result_type> {
                 use ::graphql_orm::graphql::auth::AuthExt;
                 use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
@@ -3223,8 +3223,8 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                             )
                             .fetch_one(pool)
                             .await
-                            .map_err(|e| async_graphql::Error::new(e.to_string()))?
-                            .ok_or_else(|| async_graphql::Error::new("Entity not found after creation"))?;
+                            .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?
+                            .ok_or_else(|| ::graphql_orm::async_graphql::Error::new("Entity not found after creation"))?;
 
                         // Broadcast entity change event if subscription channel is configured
                         if let Ok(tx) = ctx.data::<::graphql_orm::tokio::sync::broadcast::Sender<#changed_event>>() {
@@ -3248,10 +3248,10 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             #[graphql(name = #update_mutation_name)]
             async fn update(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Id")] id: #pk_type,
                 #[graphql(name = "Input")] input: #update_input,
-            ) -> async_graphql::Result<#result_type> {
+            ) -> ::graphql_orm::async_graphql::Result<#result_type> {
                 use ::graphql_orm::graphql::auth::AuthExt;
                 use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
@@ -3296,7 +3296,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                             )
                             .fetch_one(pool)
                             .await
-                            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                            .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
 
                         match entity {
                             Some(entity) => {
@@ -3326,9 +3326,9 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             #[graphql(name = #delete_mutation_name)]
             async fn delete(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Id")] id: #pk_type,
-            ) -> async_graphql::Result<#result_type> {
+            ) -> ::graphql_orm::async_graphql::Result<#result_type> {
                 use ::graphql_orm::graphql::auth::AuthExt;
                 use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, SqlValue};
 
@@ -3344,7 +3344,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     )
                     .fetch_one(pool)
                     .await
-                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                    .map_err(|e| ::graphql_orm::async_graphql::Error::new(e.to_string()))?;
 
                 if entity.is_none() {
                     return Ok(#result_type::err("Entity not found"));
@@ -3387,10 +3387,10 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             #[graphql(name = #update_many_mutation_name)]
             async fn update_many(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Where")] where_input: Option<#where_input>,
                 #[graphql(name = "Input")] input: #update_input,
-            ) -> async_graphql::Result<#update_many_result_type> {
+            ) -> ::graphql_orm::async_graphql::Result<#update_many_result_type> {
                 use ::graphql_orm::graphql::auth::AuthExt;
                 use ::graphql_orm::graphql::orm::{DatabaseFilter, EntityQuery};
 
@@ -3446,9 +3446,9 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             #[graphql(name = #delete_many_mutation_name)]
             async fn delete_many(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Where")] where_input: Option<#where_input>,
-            ) -> async_graphql::Result<#delete_many_result_type> {
+            ) -> ::graphql_orm::async_graphql::Result<#delete_many_result_type> {
                 use ::graphql_orm::graphql::auth::AuthExt;
                 use ::graphql_orm::graphql::orm::{DatabaseEntity, DatabaseFilter, EntityQuery, FromSqlRow};
 
@@ -3482,15 +3482,15 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         #[derive(Default)]
         pub struct #subscriptions_struct;
 
-        #[async_graphql::Subscription]
+        #[::graphql_orm::async_graphql::Subscription]
         impl #subscriptions_struct {
             /// Subscribe to #struct_name_str changes
             #[graphql(name = #subscription_name)]
             async fn on_changed(
                 &self,
-                ctx: &async_graphql::Context<'_>,
+                ctx: &::graphql_orm::async_graphql::Context<'_>,
                 #[graphql(name = "Filter")] _filter: Option<::graphql_orm::graphql::orm::SubscriptionFilterInput>,
-            ) -> async_graphql::Result<impl ::graphql_orm::futures::Stream<Item = #changed_event>> {
+            ) -> ::graphql_orm::async_graphql::Result<impl ::graphql_orm::futures::Stream<Item = #changed_event>> {
                 use ::graphql_orm::futures::stream::{self, StreamExt};
                 use ::graphql_orm::graphql::auth::AuthExt;
 
@@ -3781,7 +3781,7 @@ pub fn schema_roots(input: TokenStream) -> TokenStream {
 }
 
 fn async_graphql_merged_object_derive() -> proc_macro2::TokenStream {
-    quote! { async_graphql::MergedObject }
+    quote! { ::graphql_orm::async_graphql::MergedObject }
 }
 
 fn emit_chunked_merged(
@@ -3847,7 +3847,7 @@ fn emit_chunked_merged_subscription(
     custom_ops: Option<&[proc_macro2::TokenStream]>,
     types: &[proc_macro2::TokenStream],
 ) -> proc_macro2::TokenStream {
-    let derive_macro = quote! { async_graphql::MergedSubscription };
+    let derive_macro = quote! { ::graphql_orm::async_graphql::MergedSubscription };
     emit_chunked_merged(name, custom_ops, types, derive_macro)
 }
 
