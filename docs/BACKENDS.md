@@ -28,7 +28,7 @@ The proc-macro crate now accepts one backend feature at a time:
 - `mysql`
 - `mssql`
 
-That selection is currently used to emit the backend-specific SQLx pool and row types in generated code. SQL dialect behaviour is not generalized yet, so only the type surface is backend-aware today.
+That selection is currently used to emit backend-neutral `graphql_orm::DbPool` and `graphql_orm::DbRow` usage in generated code while keeping backend-specific behavior inside the runtime crate.
 
 ## Target Abstractions
 
@@ -45,11 +45,11 @@ Responsible for:
 
 ### `DbPool`
 
-Abstracts the pool type used by generated helpers and resolvers.
+Abstracts the pool type used by generated helpers and resolvers through `graphql-orm`.
 
 ### `DbRow`
 
-Abstracts row decoding so generated entity mapping is not tied to `SqliteRow`.
+Abstracts row decoding so generated entity mapping is not tied to a backend-specific row type.
 
 ### Typed value binding
 
@@ -68,7 +68,7 @@ Avoid serializing too much through `.to_string()`. The host layer should bind:
 
 1. Keep SQLite as the baseline implementation.
 2. Introduce dialect traits without changing generated API shape too aggressively.
-3. Refactor generated code to call backend-neutral helpers.
+3. Refactor generated code to call backend-neutral helpers in `graphql-orm`.
 4. Add PostgreSQL support first.
 5. Add MySQL support next.
 6. Add SQL Server support after placeholder/pagination/returning behaviour is settled.
@@ -103,6 +103,6 @@ Optional backend-native enhancements:
 
 ## Risks
 
-- backend-specific SQL divergence can leak into macro code if the dialect boundary is too weak
+- backend-specific SQL divergence can leak back into macro code if the runtime dialect boundary is too weak
 - row decoding can become difficult to unify if host traits are underspecified
 - typed bind/value handling needs to be designed early, or portability will remain shallow

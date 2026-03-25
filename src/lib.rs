@@ -37,13 +37,13 @@ compile_error!("Enable only one database backend feature at a time.");
 
 fn backend_row_type_tokens() -> proc_macro2::TokenStream {
     if cfg!(feature = "sqlite") {
-        quote! { sqlx::sqlite::SqliteRow }
+        quote! { ::graphql_orm::DbRow }
     } else if cfg!(feature = "postgres") {
-        quote! { sqlx::postgres::PgRow }
+        quote! { ::graphql_orm::DbRow }
     } else if cfg!(feature = "mysql") {
-        quote! { sqlx::mysql::MySqlRow }
+        quote! { ::graphql_orm::DbRow }
     } else if cfg!(feature = "mssql") {
-        quote! { sqlx::mssql::MssqlRow }
+        quote! { ::graphql_orm::DbRow }
     } else {
         proc_macro2::TokenStream::new()
     }
@@ -51,13 +51,13 @@ fn backend_row_type_tokens() -> proc_macro2::TokenStream {
 
 fn backend_pool_type_tokens() -> proc_macro2::TokenStream {
     if cfg!(feature = "sqlite") {
-        quote! { sqlx::SqlitePool }
+        quote! { ::graphql_orm::DbPool }
     } else if cfg!(feature = "postgres") {
-        quote! { sqlx::PgPool }
+        quote! { ::graphql_orm::DbPool }
     } else if cfg!(feature = "mysql") {
-        quote! { sqlx::MySqlPool }
+        quote! { ::graphql_orm::DbPool }
     } else if cfg!(feature = "mssql") {
-        quote! { sqlx::MssqlPool }
+        quote! { ::graphql_orm::DbPool }
     } else {
         proc_macro2::TokenStream::new()
     }
@@ -65,13 +65,13 @@ fn backend_pool_type_tokens() -> proc_macro2::TokenStream {
 
 fn backend_helper_import_tokens() -> proc_macro2::TokenStream {
     if cfg!(feature = "sqlite") {
-        quote! { use crate::db::sqlite_helpers::*; }
+        quote! { use ::graphql_orm::db::sqlite_helpers::*; }
     } else if cfg!(feature = "postgres") {
-        quote! { use crate::db::postgres_helpers::*; }
+        quote! { use ::graphql_orm::db::postgres_helpers::*; }
     } else if cfg!(feature = "mysql") {
-        quote! { use crate::db::mysql_helpers::*; }
+        quote! { use ::graphql_orm::db::mysql_helpers::*; }
     } else if cfg!(feature = "mssql") {
-        quote! { use crate::db::mssql_helpers::*; }
+        quote! { use ::graphql_orm::db::mssql_helpers::*; }
     } else {
         proc_macro2::TokenStream::new()
     }
@@ -95,7 +95,7 @@ fn backend_current_epoch_expr() -> &'static str {
 ///
 /// // With entity field
 /// mutation_result!(CreateResult, entity: Entity);
-/// mutation_result!(DeleteResult, record: crate::types::Record);
+/// mutation_result!(DeleteResult, record: ::graphql_orm::types::Record);
 /// mutation_result!(BatchResult, items: Vec<Entity>);
 /// ```
 ///
@@ -635,9 +635,9 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
         quote! { format!("LOWER({}) LIKE LOWER({})", column, placeholder) }
     };
     let bool_sql_value_body = if cfg!(feature = "postgres") {
-        quote! { crate::graphql::orm::SqlValue::Bool(value) }
+        quote! { ::graphql_orm::graphql::orm::SqlValue::Bool(value) }
     } else {
-        quote! { crate::graphql::orm::SqlValue::Int(if value { 1 } else { 0 }) }
+        quote! { ::graphql_orm::graphql::orm::SqlValue::Int(if value { 1 } else { 0 }) }
     };
     let current_epoch_runtime = if cfg!(feature = "postgres") {
         quote! { "EXTRACT(EPOCH FROM NOW())::bigint" }
@@ -711,11 +711,11 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
 
             if *unique {
                 quote! {
-                    crate::graphql::orm::IndexDef::new(#name, &[#(#col_lits),*]).unique()
+                    ::graphql_orm::graphql::orm::IndexDef::new(#name, &[#(#col_lits),*]).unique()
                 }
             } else {
                 quote! {
-                    crate::graphql::orm::IndexDef::new(#name, &[#(#col_lits),*])
+                    ::graphql_orm::graphql::orm::IndexDef::new(#name, &[#(#col_lits),*])
                 }
             }
         })
@@ -779,7 +779,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
         };
 
         column_defs.push(quote! {
-            crate::graphql::orm::ColumnDef {
+            ::graphql_orm::graphql::orm::ColumnDef {
                 name: #db_col,
                 sql_type: #sql_type,
                 nullable: #is_nullable,
@@ -814,7 +814,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
                 syn::Ident::new(&to_snake_case(&graphql_name), field_name.span());
             order_by_fields.push(quote! {
                 #[graphql(name = #graphql_name)]
-                pub #order_field_name: Option<crate::graphql::orm::OrderDirection>,
+                pub #order_field_name: Option<::graphql_orm::graphql::orm::OrderDirection>,
             });
         }
 
@@ -873,7 +873,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             #(#order_by_fields)*
         }
 
-        impl crate::graphql::orm::DatabaseOrderBy for #order_by_name {
+        impl ::graphql_orm::graphql::orm::DatabaseOrderBy for #order_by_name {
             fn to_sql_order(&self) -> Option<String> {
                 let mut parts = Vec::new();
                 #(#order_by_match_arms)*
@@ -885,8 +885,8 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             }
         }
 
-        impl crate::graphql::orm::DatabaseFilter for #where_input_name {
-            fn to_sql_conditions(&self) -> (Vec<String>, Vec<crate::graphql::orm::SqlValue>) {
+        impl ::graphql_orm::graphql::orm::DatabaseFilter for #where_input_name {
+            fn to_sql_conditions(&self) -> (Vec<String>, Vec<::graphql_orm::graphql::orm::SqlValue>) {
                 let mut conditions = Vec::new();
                 let mut values = Vec::new();
 
@@ -935,7 +935,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             }
         }
 
-        impl crate::graphql::orm::DatabaseEntity for #struct_name {
+        impl ::graphql_orm::graphql::orm::DatabaseEntity for #struct_name {
             const TABLE_NAME: &'static str = #table_name;
             const PLURAL_NAME: &'static str = #plural_name;
             const PRIMARY_KEY: &'static str = #primary_key;
@@ -968,7 +968,7 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
                 #ci_like_body
             }
 
-            pub(crate) fn __gom_bool_sql_value(value: bool) -> crate::graphql::orm::SqlValue {
+            pub(crate) fn __gom_bool_sql_value(value: bool) -> ::graphql_orm::graphql::orm::SqlValue {
                 #bool_sql_value_body
             }
 
@@ -989,16 +989,16 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             }
         }
 
-        impl crate::graphql::orm::DatabaseSchema for #struct_name {
-            fn columns() -> &'static [crate::graphql::orm::ColumnDef] {
-                static COLUMNS: &[crate::graphql::orm::ColumnDef] = &[
+        impl ::graphql_orm::graphql::orm::DatabaseSchema for #struct_name {
+            fn columns() -> &'static [::graphql_orm::graphql::orm::ColumnDef] {
+                static COLUMNS: &[::graphql_orm::graphql::orm::ColumnDef] = &[
                     #(#column_defs),*
                 ];
                 COLUMNS
             }
 
-            fn indexes() -> &'static [crate::graphql::orm::IndexDef] {
-                static INDEXES: &[crate::graphql::orm::IndexDef] = &[
+            fn indexes() -> &'static [::graphql_orm::graphql::orm::IndexDef] {
+                static INDEXES: &[::graphql_orm::graphql::orm::IndexDef] = &[
                     #(#index_defs),*
                 ];
                 INDEXES
@@ -1012,9 +1012,9 @@ fn generate_graphql_entity(input: &DeriveInput) -> syn::Result<proc_macro2::Toke
             }
         }
 
-        impl crate::graphql::orm::FromSqlRow for #struct_name {
-            fn from_row(row: &#row_type) -> Result<Self, sqlx::Error> {
-                use sqlx::Row;
+        impl ::graphql_orm::graphql::orm::FromSqlRow for #struct_name {
+            fn from_row(row: &#row_type) -> Result<Self, ::graphql_orm::sqlx::Error> {
+                use ::graphql_orm::sqlx::Row;
                 #helper_import
 
                 Ok(Self {
@@ -1042,34 +1042,34 @@ fn generate_filter_field(
         "string" => {
             let input = quote! {
                 #[graphql(name = #graphql_name)]
-                pub #filter_field_name: Option<crate::graphql::filters::StringFilter>,
+                pub #filter_field_name: Option<::graphql_orm::graphql::filters::StringFilter>,
             };
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
                     if let Some(ref v) = f.eq {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} = {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.ne {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} != {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.contains {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(format!("%{}%", v)));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(format!("%{}%", v)));
                     }
                     if let Some(ref v) = f.starts_with {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(format!("{}%", v)));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(format!("{}%", v)));
                     }
                     if let Some(ref v) = f.ends_with {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(format!("%{}", v)));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(format!("%{}", v)));
                     }
                     if let Some(ref list) = f.in_list {
                         if !list.is_empty() {
@@ -1079,7 +1079,7 @@ fn generate_filter_field(
                                 .collect();
                             conditions.push(format!("{} IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
-                                values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                                values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                             }
                         }
                     }
@@ -1091,7 +1091,7 @@ fn generate_filter_field(
                                 .collect();
                             conditions.push(format!("{} NOT IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
-                                values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                                values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                             }
                         }
                     }
@@ -1108,10 +1108,10 @@ fn generate_filter_field(
                     if let Some(ref sim) = f.similar {
                         // Use a broad LIKE pattern to get candidates
                         // Fuzzy scoring with strsim happens after fetch
-                        let pattern = crate::graphql::orm::generate_candidate_pattern(&sim.value);
+                        let pattern = ::graphql_orm::graphql::orm::generate_candidate_pattern(&sim.value);
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(#struct_name::__gom_ci_like(#db_col, &placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(pattern));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(pattern));
                     }
                 }
             };
@@ -1120,39 +1120,39 @@ fn generate_filter_field(
         "number" => {
             let input = quote! {
                 #[graphql(name = #graphql_name)]
-                pub #filter_field_name: Option<crate::graphql::filters::IntFilter>,
+                pub #filter_field_name: Option<::graphql_orm::graphql::filters::IntFilter>,
             };
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
                     if let Some(v) = f.eq {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} = {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::Int(v as i64));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.ne {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} != {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::Int(v as i64));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.lt {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} < {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::Int(v as i64));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.lte {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} <= {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::Int(v as i64));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.gt {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} > {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::Int(v as i64));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(v) = f.gte {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} >= {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::Int(v as i64));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::Int(v as i64));
                     }
                     if let Some(ref list) = f.in_list {
                         if !list.is_empty() {
@@ -1162,7 +1162,7 @@ fn generate_filter_field(
                                 .collect();
                             conditions.push(format!("{} IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
-                                values.push(crate::graphql::orm::SqlValue::Int(*v as i64));
+                                values.push(::graphql_orm::graphql::orm::SqlValue::Int(*v as i64));
                             }
                         }
                     }
@@ -1174,7 +1174,7 @@ fn generate_filter_field(
                                 .collect();
                             conditions.push(format!("{} NOT IN ({})", #db_col, placeholders.join(", ")));
                             for v in list {
-                                values.push(crate::graphql::orm::SqlValue::Int(*v as i64));
+                                values.push(::graphql_orm::graphql::orm::SqlValue::Int(*v as i64));
                             }
                         }
                     }
@@ -1193,7 +1193,7 @@ fn generate_filter_field(
         "boolean" | "bool" => {
             let input = quote! {
                 #[graphql(name = #graphql_name)]
-                pub #filter_field_name: Option<crate::graphql::filters::BoolFilter>,
+                pub #filter_field_name: Option<::graphql_orm::graphql::filters::BoolFilter>,
             };
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
@@ -1222,47 +1222,47 @@ fn generate_filter_field(
         "date" => {
             let input = quote! {
                 #[graphql(name = #graphql_name)]
-                pub #filter_field_name: Option<crate::graphql::filters::DateFilter>,
+                pub #filter_field_name: Option<::graphql_orm::graphql::filters::DateFilter>,
             };
             let sql = quote! {
                 if let Some(ref f) = self.#filter_field_name {
                     if let Some(ref v) = f.eq {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} = {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.ne {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} != {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.lt {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} < {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.lte {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} <= {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.gt {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} > {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref v) = f.gte {
                         let placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                         conditions.push(format!("{} >= {}", #db_col, placeholder));
-                        values.push(crate::graphql::orm::SqlValue::String(v.clone()));
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(v.clone()));
                     }
                     if let Some(ref range) = f.between {
                         if let (Some(start), Some(end)) = (&range.start, &range.end) {
                             let start_placeholder = #struct_name::__gom_placeholder(values.len() + 1);
                             let end_placeholder = #struct_name::__gom_placeholder(values.len() + 2);
                             conditions.push(format!("{} BETWEEN {} AND {}", #db_col, start_placeholder, end_placeholder));
-                            values.push(crate::graphql::orm::SqlValue::String(start.clone()));
-                            values.push(crate::graphql::orm::SqlValue::String(end.clone()));
+                            values.push(::graphql_orm::graphql::orm::SqlValue::String(start.clone()));
+                            values.push(::graphql_orm::graphql::orm::SqlValue::String(end.clone()));
                         }
                     }
                     // IsNull / IsNotNull
@@ -1345,7 +1345,7 @@ fn generate_row_field_assignment(
     } else {
         quote! {{
             let s: String = row.try_get(#db_col)?;
-            str_to_uuid(&s).map_err(|e| sqlx::Error::Decode(e.into()))?
+            str_to_uuid(&s).map_err(|e| ::graphql_orm::sqlx::Error::Decode(e.into()))?
         }}
     };
     let datetime_expr = if cfg!(feature = "postgres") {
@@ -1353,7 +1353,7 @@ fn generate_row_field_assignment(
     } else {
         quote! {{
             let s: String = row.try_get(#db_col)?;
-            str_to_datetime(&s).map_err(|e| sqlx::Error::Decode(e.into()))?
+            str_to_datetime(&s).map_err(|e| ::graphql_orm::sqlx::Error::Decode(e.into()))?
         }}
     };
     // Handle special field types
@@ -1474,7 +1474,7 @@ fn generate_option_row_field_assignment(
             let s: Option<String> = row.try_get(#db_col)?;
             s.map(|s| str_to_uuid(&s))
                 .transpose()
-                .map_err(|e| sqlx::Error::Decode(e.into()))?
+                .map_err(|e| ::graphql_orm::sqlx::Error::Decode(e.into()))?
         }}
     };
     let optional_datetime_expr = if cfg!(feature = "postgres") {
@@ -1484,7 +1484,7 @@ fn generate_option_row_field_assignment(
             let s: Option<String> = row.try_get(#db_col)?;
             s.map(|s| str_to_datetime(&s))
                 .transpose()
-                .map_err(|e| sqlx::Error::Decode(e.into()))?
+                .map_err(|e| ::graphql_orm::sqlx::Error::Decode(e.into()))?
         }}
     };
     if let syn::Type::Path(inner_path) = inner_type {
@@ -1899,7 +1899,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             let target_type = &r.target_type_str;
             let is_multiple = r.is_multiple;
             quote! {
-                crate::graphql::orm::RelationMetadata {
+                ::graphql_orm::graphql::orm::RelationMetadata {
                     field_name: #graphql_name,
                     target_type: #target_type,
                     is_multiple: #is_multiple,
@@ -1939,10 +1939,10 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             })?;
 
         let sql_value_expr = match source_kind {
-            RelationValueKind::String => quote! { crate::graphql::orm::SqlValue::String(value.clone()) },
-            RelationValueKind::Int => quote! { crate::graphql::orm::SqlValue::Int(*value as i64) },
-            RelationValueKind::Float => quote! { crate::graphql::orm::SqlValue::Float((*value).into()) },
-            RelationValueKind::Bool => quote! { crate::graphql::orm::SqlValue::Bool(*value) },
+            RelationValueKind::String => quote! { ::graphql_orm::graphql::orm::SqlValue::String(value.clone()) },
+            RelationValueKind::Int => quote! { ::graphql_orm::graphql::orm::SqlValue::Int(*value as i64) },
+            RelationValueKind::Float => quote! { ::graphql_orm::graphql::orm::SqlValue::Float((*value).into()) },
+            RelationValueKind::Bool => quote! { ::graphql_orm::graphql::orm::SqlValue::Bool(*value) },
         };
 
         let loader_key_expr = match source_kind {
@@ -1967,7 +1967,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
         let source_binding_multiple = if source_is_option {
             quote! {
                 let Some(value) = self.#source_field.as_ref() else {
-                    let page_info = crate::graphql::pagination::PageInfo {
+                    let page_info = ::graphql_orm::graphql::pagination::PageInfo {
                         has_next_page: false,
                         has_previous_page: false,
                         start_cursor: None,
@@ -2016,16 +2016,13 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 async fn #field_name(
                     &self,
                     ctx: &async_graphql::Context<'_>,
-                    #[graphql(name = "Where")] where_input: Option<crate::graphql::entities::#where_input>,
-                    #[graphql(name = "OrderBy")] order_by: Option<crate::graphql::entities::#order_by_input>,
-                    #[graphql(name = "Page")] page: Option<crate::graphql::orm::PageInput>,
-                ) -> async_graphql::Result<crate::graphql::entities::#connection_type> {
-                    use crate::graphql::entities::#target_type;
-                    use crate::graphql::entities::#connection_type;
-                    use crate::graphql::entities::#edge_type;
-                    use crate::graphql::orm::{DatabaseEntity, DatabaseFilter, DatabaseOrderBy, EntityQuery, SqlValue};
+                    #[graphql(name = "Where")] where_input: Option<#where_input>,
+                    #[graphql(name = "OrderBy")] order_by: Option<#order_by_input>,
+                    #[graphql(name = "Page")] page: Option<::graphql_orm::graphql::orm::PageInput>,
+                ) -> async_graphql::Result<#connection_type> {
+                    use ::graphql_orm::graphql::orm::{DatabaseEntity, DatabaseFilter, DatabaseOrderBy, EntityQuery, SqlValue};
 
-                    let db = ctx.data_unchecked::<crate::db::Database>();
+                    let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
 
                     if where_input.is_none() && order_by.is_none() && page.is_none() && !self.#field_name.is_empty() {
                         let entities = self.#field_name.clone();
@@ -2033,11 +2030,11 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                             .into_iter()
                             .enumerate()
                             .map(|(i, entity)| #edge_type {
-                                cursor: crate::graphql::pagination::encode_cursor(i as i64),
+                                cursor: ::graphql_orm::graphql::pagination::encode_cursor(i as i64),
                                 node: entity,
                             })
                             .collect();
-                        let page_info = crate::graphql::pagination::PageInfo {
+                        let page_info = ::graphql_orm::graphql::pagination::PageInfo {
                             has_next_page: false,
                             has_previous_page: false,
                             start_cursor: edges.first().map(|e| e.cursor.clone()),
@@ -2054,7 +2051,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
 
                     let entities: Vec<#target_type> = if use_dataloader {
                         // Fast path: Use DataLoader for batched loading
-                        use crate::graphql::loaders::RelationLoader;
+                        use ::graphql_orm::graphql::loaders::RelationLoader;
                         use async_graphql::dataloader::DataLoader;
 
                         let loader = ctx.data_unchecked::<DataLoader<RelationLoader<#target_type>>>();
@@ -2107,12 +2104,12 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                             .into_iter()
                             .enumerate()
                             .map(|(i, entity)| #edge_type {
-                                cursor: crate::graphql::pagination::encode_cursor((offset + i) as i64),
+                                cursor: ::graphql_orm::graphql::pagination::encode_cursor((offset + i) as i64),
                                 node: entity,
                             })
                             .collect();
 
-                        let page_info = crate::graphql::pagination::PageInfo {
+                        let page_info = ::graphql_orm::graphql::pagination::PageInfo {
                             has_next_page,
                             has_previous_page,
                             start_cursor: edges.first().map(|e| e.cursor.clone()),
@@ -2135,12 +2132,12 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                         .into_iter()
                         .enumerate()
                         .map(|(i, entity)| #edge_type {
-                            cursor: crate::graphql::pagination::encode_cursor((offset + i) as i64),
+                            cursor: ::graphql_orm::graphql::pagination::encode_cursor((offset + i) as i64),
                                 node: entity,
                             })
                             .collect();
 
-                    let page_info = crate::graphql::pagination::PageInfo {
+                    let page_info = ::graphql_orm::graphql::pagination::PageInfo {
                         has_next_page,
                         has_previous_page,
                         start_cursor: edges.first().map(|e| e.cursor.clone()),
@@ -2159,19 +2156,18 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 async fn #field_name(
                     &self,
                     ctx: &async_graphql::Context<'_>,
-                ) -> async_graphql::Result<Option<crate::graphql::entities::#target_type>> {
-                    use crate::graphql::orm::{DatabaseEntity, EntityQuery, SqlValue};
-                    use crate::graphql::entities::#target_type;
+                ) -> async_graphql::Result<Option<#target_type>> {
+                    use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, SqlValue};
 
                     if self.#field_name.is_some() {
                         return Ok(self.#field_name.clone());
                     }
 
-                    let db = ctx.data_unchecked::<crate::db::Database>();
+                    let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                     #source_binding_single
 
                     let result = if #source_supports_dataloader {
-                        use crate::graphql::loaders::RelationLoader;
+                        use ::graphql_orm::graphql::loaders::RelationLoader;
                         use async_graphql::dataloader::DataLoader;
 
                         let loader = ctx.data_unchecked::<DataLoader<RelationLoader<#target_type>>>();
@@ -2226,16 +2222,16 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             };
             let sql_value_expr = match source_kind {
                 RelationValueKind::String => {
-                    quote! { crate::graphql::orm::SqlValue::String(value.clone()) }
+                    quote! { ::graphql_orm::graphql::orm::SqlValue::String(value.clone()) }
                 }
                 RelationValueKind::Int => {
-                    quote! { crate::graphql::orm::SqlValue::Int((*value) as i64) }
+                    quote! { ::graphql_orm::graphql::orm::SqlValue::Int((*value) as i64) }
                 }
                 RelationValueKind::Float => {
-                    quote! { crate::graphql::orm::SqlValue::Float((*value).into()) }
+                    quote! { ::graphql_orm::graphql::orm::SqlValue::Float((*value).into()) }
                 }
                 RelationValueKind::Bool => {
-                    quote! { crate::graphql::orm::SqlValue::Bool(*value) }
+                    quote! { ::graphql_orm::graphql::orm::SqlValue::Bool(*value) }
                 }
             };
 
@@ -2291,9 +2287,9 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             };
 
             let grouped_type = if r.is_multiple {
-                quote! { std::collections::HashMap<String, Vec<crate::graphql::entities::#target_type>> }
+                quote! { std::collections::HashMap<String, Vec<#target_type>> }
             } else {
-                quote! { std::collections::HashMap<String, crate::graphql::entities::#target_type> }
+                quote! { std::collections::HashMap<String, #target_type> }
             };
 
             let insert_grouped = if r.is_multiple {
@@ -2308,7 +2304,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
 
             Ok(quote! {
                 if Self::__gom_selection_contains(selection, #graphql_name) {
-                    let mut unique_relation_keys: Vec<(String, crate::graphql::orm::SqlValue)> = Vec::new();
+                    let mut unique_relation_keys: Vec<(String, ::graphql_orm::graphql::orm::SqlValue)> = Vec::new();
                     let mut seen_relation_keys = std::collections::HashSet::new();
 
                     for entity in entities.iter() {
@@ -2323,33 +2319,33 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
 
                     if !unique_relation_keys.is_empty() {
                         let placeholders = (0..unique_relation_keys.len())
-                            .map(|index| <crate::graphql::entities::#target_type>::__gom_placeholder(index + 1))
+                            .map(|index| <#target_type>::__gom_placeholder(index + 1))
                             .collect::<Vec<_>>();
                         let sql = format!(
                             "SELECT {}, CAST({} AS TEXT) AS __gom_relation_key FROM {} WHERE {} IN ({})",
-                            <crate::graphql::entities::#target_type as crate::graphql::orm::DatabaseEntity>::column_names().join(", "),
+                            <#target_type as ::graphql_orm::graphql::orm::DatabaseEntity>::column_names().join(", "),
                             #fk_column,
-                            <crate::graphql::entities::#target_type as crate::graphql::orm::DatabaseEntity>::TABLE_NAME,
+                            <#target_type as ::graphql_orm::graphql::orm::DatabaseEntity>::TABLE_NAME,
                             #fk_column,
                             placeholders.join(", ")
                         );
 
-                        let mut query = sqlx::query(&sql);
+                        let mut query = ::graphql_orm::sqlx::query(&sql);
                         for (_, value) in &unique_relation_keys {
                             query = match value {
-                                crate::graphql::orm::SqlValue::String(value) => query.bind(value),
-                                crate::graphql::orm::SqlValue::Int(value) => query.bind(*value),
-                                crate::graphql::orm::SqlValue::Float(value) => query.bind(*value),
-                                crate::graphql::orm::SqlValue::Bool(value) => query.bind(*value),
-                                crate::graphql::orm::SqlValue::Null => query.bind(Option::<String>::None),
+                                ::graphql_orm::graphql::orm::SqlValue::String(value) => query.bind(value),
+                                ::graphql_orm::graphql::orm::SqlValue::Int(value) => query.bind(*value),
+                                ::graphql_orm::graphql::orm::SqlValue::Float(value) => query.bind(*value),
+                                ::graphql_orm::graphql::orm::SqlValue::Bool(value) => query.bind(*value),
+                                ::graphql_orm::graphql::orm::SqlValue::Null => query.bind(Option::<String>::None),
                             };
                         }
 
                         let rows = query.fetch_all(pool).await?;
                         for row in rows {
-                            use sqlx::Row;
+                            use ::graphql_orm::sqlx::Row;
                             let relation_key: String = row.try_get("__gom_relation_key")?;
-                            let related = <crate::graphql::entities::#target_type as crate::graphql::orm::FromSqlRow>::from_row(&row)?;
+                            let related = <#target_type as ::graphql_orm::graphql::orm::FromSqlRow>::from_row(&row)?;
                             #insert_grouped
                         }
                     }
@@ -2378,12 +2374,12 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
     };
 
     Ok(quote! {
-        impl crate::graphql::orm::RelationLoader for #struct_name {
+        impl ::graphql_orm::graphql::orm::RelationLoader for #struct_name {
             async fn load_relations(
                 &mut self,
                 pool: &#pool_type,
                 selection: &[async_graphql::context::SelectionField<'_>],
-            ) -> Result<(), sqlx::Error> {
+            ) -> Result<(), ::graphql_orm::sqlx::Error> {
                 Self::bulk_load_relations(std::slice::from_mut(self), pool, selection).await
             }
 
@@ -2391,7 +2387,7 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 entities: &mut [Self],
                 pool: &#pool_type,
                 selection: &[async_graphql::context::SelectionField<'_>],
-            ) -> Result<(), sqlx::Error> {
+            ) -> Result<(), ::graphql_orm::sqlx::Error> {
                 #(#bulk_load_blocks)*
                 Ok(())
             }
@@ -2412,8 +2408,8 @@ fn generate_graphql_relations(input: &DeriveInput) -> syn::Result<proc_macro2::T
             }
 
             /// Get relation metadata for look_ahead traversal
-            pub fn relation_metadata() -> &'static [crate::graphql::orm::RelationMetadata] {
-                static RELATIONS: &[crate::graphql::orm::RelationMetadata] = &[
+            pub fn relation_metadata() -> &'static [::graphql_orm::graphql::orm::RelationMetadata] {
+                static RELATIONS: &[::graphql_orm::graphql::orm::RelationMetadata] = &[
                     #(#relation_metadata),*
                 ];
                 RELATIONS
@@ -2524,21 +2520,21 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
     };
     let notify_on_created = if let Some(ref notify_handler) = notify_handler_path {
         quote! {
-            #notify_handler(ctx, pool, &entity, crate::graphql::orm::ChangeAction::Created).await?;
+            #notify_handler(ctx, pool, &entity, ::graphql_orm::graphql::orm::ChangeAction::Created).await?;
         }
     } else {
         quote! {}
     };
     let notify_on_updated = if let Some(ref notify_handler) = notify_handler_path {
         quote! {
-            #notify_handler(ctx, pool, &entity, crate::graphql::orm::ChangeAction::Updated).await?;
+            #notify_handler(ctx, pool, &entity, ::graphql_orm::graphql::orm::ChangeAction::Updated).await?;
         }
     } else {
         quote! {}
     };
     let notify_on_deleted = if let Some(ref notify_handler) = notify_handler_path {
         quote! {
-            #notify_handler(ctx, pool, &entity, crate::graphql::orm::ChangeAction::Deleted).await?;
+            #notify_handler(ctx, pool, &entity, ::graphql_orm::graphql::orm::ChangeAction::Deleted).await?;
         }
     } else {
         quote! {}
@@ -2644,13 +2640,13 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             insert_columns.push(db_col.clone());
 
             // Generate bind value push based on field type
-            // We push to bind_values vector to avoid lifetime issues with sqlx::query
+            // We push to bind_values vector to avoid lifetime issues with ::graphql_orm::sqlx::query
             if meta.is_boolean_field || is_bool_type(field_type) {
                 if is_option_type(field_type) {
                     insert_binds.push(quote! {
                         match input.#field_name {
                             Some(b) => bind_values.push(#struct_name::__gom_bool_sql_value(b)),
-                            None => bind_values.push(crate::graphql::orm::SqlValue::Null),
+                            None => bind_values.push(::graphql_orm::graphql::orm::SqlValue::Null),
                         }
                     });
                 } else {
@@ -2662,7 +2658,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 || (is_vec_type(field_type) && !is_byte_vec_type(field_type))
             {
                 insert_binds.push(quote! {
-                    bind_values.push(crate::graphql::orm::SqlValue::String(
+                    bind_values.push(::graphql_orm::graphql::orm::SqlValue::String(
                         serde_json::to_string(&input.#field_name).unwrap_or_else(|_| "[]".to_string())
                     ));
                 });
@@ -2675,16 +2671,16 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                         match &input.#field_name {
                             Some(v) => {
                                 let __transformed = #value_expr;
-                                bind_values.push(crate::graphql::orm::SqlValue::String(__transformed));
+                                bind_values.push(::graphql_orm::graphql::orm::SqlValue::String(__transformed));
                             }
-                            None => bind_values.push(crate::graphql::orm::SqlValue::Null),
+                            None => bind_values.push(::graphql_orm::graphql::orm::SqlValue::Null),
                         }
                     });
                 } else {
                     insert_binds.push(quote! {
                         match &input.#field_name {
-                            Some(v) => bind_values.push(crate::graphql::orm::SqlValue::String(#value_expr)),
-                            None => bind_values.push(crate::graphql::orm::SqlValue::Null),
+                            Some(v) => bind_values.push(::graphql_orm::graphql::orm::SqlValue::String(#value_expr)),
+                            None => bind_values.push(::graphql_orm::graphql::orm::SqlValue::Null),
                         }
                     });
                 }
@@ -2697,12 +2693,12 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     insert_binds.push(quote! {
                         {
                             let __transformed = #value_expr;
-                            bind_values.push(crate::graphql::orm::SqlValue::String(__transformed));
+                            bind_values.push(::graphql_orm::graphql::orm::SqlValue::String(__transformed));
                         }
                     });
                 } else {
                     insert_binds.push(quote! {
-                        bind_values.push(crate::graphql::orm::SqlValue::String(#value_expr));
+                        bind_values.push(::graphql_orm::graphql::orm::SqlValue::String(#value_expr));
                     });
                 }
             }
@@ -2732,7 +2728,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                             set_clauses.push(format!("{} = ?", #db_col));
                             match val {
                                 Some(b) => values.push(#struct_name::__gom_bool_sql_value(*b)),
-                                None => values.push(crate::graphql::orm::SqlValue::Null),
+                                None => values.push(::graphql_orm::graphql::orm::SqlValue::Null),
                             }
                         }
                     });
@@ -2751,7 +2747,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 update_field_checks.push(quote! {
                     if let Some(ref val) = input.#field_name {
                         set_clauses.push(format!("{} = ?", #db_col));
-                        values.push(crate::graphql::orm::SqlValue::String(
+                        values.push(::graphql_orm::graphql::orm::SqlValue::String(
                             serde_json::to_string(val).unwrap_or_else(|_| "[]".to_string())
                         ));
                     }
@@ -2767,9 +2763,9 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                             match val {
                                 Some(v) => {
                                     let __transformed = #value_expr;
-                                    values.push(crate::graphql::orm::SqlValue::String(__transformed));
+                                    values.push(::graphql_orm::graphql::orm::SqlValue::String(__transformed));
                                 }
-                                None => values.push(crate::graphql::orm::SqlValue::Null),
+                                None => values.push(::graphql_orm::graphql::orm::SqlValue::Null),
                             }
                         }
                     });
@@ -2778,8 +2774,8 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                         if let Some(ref val) = input.#field_name {
                             set_clauses.push(format!("{} = ?", #db_col));
                             match val {
-                                Some(v) => values.push(crate::graphql::orm::SqlValue::String(#value_expr)),
-                                None => values.push(crate::graphql::orm::SqlValue::Null),
+                                Some(v) => values.push(::graphql_orm::graphql::orm::SqlValue::String(#value_expr)),
+                                None => values.push(::graphql_orm::graphql::orm::SqlValue::Null),
                             }
                         }
                     });
@@ -2793,14 +2789,14 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                         if let Some(ref val) = input.#field_name {
                             set_clauses.push(format!("{} = ?", #db_col));
                             let __transformed = #value_expr;
-                            values.push(crate::graphql::orm::SqlValue::String(__transformed));
+                            values.push(::graphql_orm::graphql::orm::SqlValue::String(__transformed));
                         }
                     });
                 } else {
                     update_field_checks.push(quote! {
                         if let Some(ref val) = input.#field_name {
                             set_clauses.push(format!("{} = ?", #db_col));
-                            values.push(crate::graphql::orm::SqlValue::String(#value_expr));
+                            values.push(::graphql_orm::graphql::orm::SqlValue::String(#value_expr));
                         }
                     });
                 }
@@ -2843,7 +2839,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
     };
     let created_pk_init = if auto_generated_pk {
         quote! {
-            let created_pk = uuid::Uuid::new_v4().to_string();
+            let created_pk = ::graphql_orm::uuid::Uuid::new_v4().to_string();
         }
     } else {
         quote! {
@@ -2852,7 +2848,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
     };
     let prepend_pk_bind = if auto_generated_pk {
         quote! {
-            bind_values.push(crate::graphql::orm::SqlValue::String(created_pk.clone()));
+            bind_values.push(::graphql_orm::graphql::orm::SqlValue::String(created_pk.clone()));
         }
     } else {
         quote! {}
@@ -2896,7 +2892,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     .into_iter()
                     .map(|edge| edge.node)
                     .collect::<Vec<_>>();
-                <#struct_name as crate::graphql::orm::RelationLoader>::bulk_load_relations(
+                <#struct_name as ::graphql_orm::graphql::orm::RelationLoader>::bulk_load_relations(
                     &mut entities,
                     pool,
                     &selection,
@@ -2906,7 +2902,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 generic_conn.edges = cursors
                     .into_iter()
                     .zip(entities.into_iter())
-                    .map(|(cursor, node)| crate::graphql::pagination::Edge { cursor, node })
+                    .map(|(cursor, node)| ::graphql_orm::graphql::pagination::Edge { cursor, node })
                     .collect();
             }
         }
@@ -2917,7 +2913,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         quote! {
             if let Some(entity) = entity.as_mut() {
                 let selection = ctx.field().selection_set().collect::<Vec<_>>();
-                <#struct_name as crate::graphql::orm::RelationLoader>::load_relations(
+                <#struct_name as ::graphql_orm::graphql::orm::RelationLoader>::load_relations(
                     entity,
                     pool,
                     &selection,
@@ -2984,12 +2980,12 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             pub edges: Vec<#edge_type>,
             /// Pagination information
             #[graphql(name = "PageInfo")]
-            pub page_info: crate::graphql::pagination::PageInfo,
+            pub page_info: ::graphql_orm::graphql::pagination::PageInfo,
         }
 
         impl #connection_type {
             /// Create from a generic Connection
-            pub fn from_generic(conn: crate::graphql::pagination::Connection<#struct_name>) -> Self {
+            pub fn from_generic(conn: ::graphql_orm::graphql::pagination::Connection<#struct_name>) -> Self {
                 Self {
                     edges: conn.edges.into_iter().map(|e| #edge_type {
                         node: e.node,
@@ -3003,7 +2999,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             pub fn empty() -> Self {
                 Self {
                     edges: Vec::new(),
-                    page_info: crate::graphql::pagination::PageInfo::default(),
+                    page_info: ::graphql_orm::graphql::pagination::PageInfo::default(),
                 }
             }
         }
@@ -3054,7 +3050,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
         #[graphql(name = #changed_event_str)]
         pub struct #changed_event {
             #[graphql(name = "Action")]
-            pub action: crate::graphql::orm::ChangeAction,
+            pub action: ::graphql_orm::graphql::orm::ChangeAction,
             #[graphql(name = "Id")]
             pub id: #pk_type,
             #[graphql(name = #struct_name_str)]
@@ -3115,13 +3111,13 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 ctx: &async_graphql::Context<'_>,
                 #[graphql(name = "Where")] where_input: Option<#where_input>,
                 #[graphql(name = "OrderBy")] order_by: Option<Vec<#order_by_input>>,
-                #[graphql(name = "Page")] page: Option<crate::graphql::orm::PageInput>,
+                #[graphql(name = "Page")] page: Option<::graphql_orm::graphql::orm::PageInput>,
             ) -> async_graphql::Result<#connection_type> {
-                use crate::graphql::orm::{DatabaseEntity, DatabaseFilter, DatabaseOrderBy, EntityQuery, FromSqlRow};
-                use crate::graphql::auth::AuthExt;
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, DatabaseFilter, DatabaseOrderBy, EntityQuery, FromSqlRow};
+                use ::graphql_orm::graphql::auth::AuthExt;
 
                 let _user = ctx.auth_user()?;
-                let db = ctx.data_unchecked::<crate::db::Database>();
+                let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                 let pool = db.pool();
 
                 let mut query = EntityQuery::<#struct_name>::new();
@@ -3159,11 +3155,11 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 ctx: &async_graphql::Context<'_>,
                 #[graphql(name = "Id")] id: #pk_type,
             ) -> async_graphql::Result<Option<#struct_name>> {
-                use crate::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
-                use crate::graphql::auth::AuthExt;
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
+                use ::graphql_orm::graphql::auth::AuthExt;
 
                 let _user = ctx.auth_user()?;
-                let db = ctx.data_unchecked::<crate::db::Database>();
+                let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                 let pool = db.pool();
 
                 let pk_col = #struct_name::PRIMARY_KEY;
@@ -3199,23 +3195,23 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 ctx: &async_graphql::Context<'_>,
                 #[graphql(name = "Input")] input: #create_input,
             ) -> async_graphql::Result<#result_type> {
-                use crate::graphql::auth::AuthExt;
-                use crate::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
+                use ::graphql_orm::graphql::auth::AuthExt;
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
                 let _user = ctx.auth_user()?;
-                let db = ctx.data_unchecked::<crate::db::Database>();
+                let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                 let pool = db.pool();
 
                 #created_pk_init
                 let sql = #struct_name::__gom_rebind_sql(#insert_sql, 1);
 
                 // Collect all values first
-                let mut bind_values: Vec<crate::graphql::orm::SqlValue> = Vec::new();
+                let mut bind_values: Vec<::graphql_orm::graphql::orm::SqlValue> = Vec::new();
                 #prepend_pk_bind
                 #(#insert_binds)*
 
                 // Execute using our helper that handles lifetimes properly
-                let result = crate::graphql::orm::execute_with_binds(&sql, &bind_values, pool).await;
+                let result = ::graphql_orm::graphql::orm::execute_with_binds(&sql, &bind_values, pool).await;
 
                 match result {
                     Ok(_) => {
@@ -3231,9 +3227,9 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                             .ok_or_else(|| async_graphql::Error::new("Entity not found after creation"))?;
 
                         // Broadcast entity change event if subscription channel is configured
-                        if let Ok(tx) = ctx.data::<tokio::sync::broadcast::Sender<#changed_event>>() {
+                        if let Ok(tx) = ctx.data::<::graphql_orm::tokio::sync::broadcast::Sender<#changed_event>>() {
                             let _ = tx.send(#changed_event {
-                                action: crate::graphql::orm::ChangeAction::Created,
+                                action: ::graphql_orm::graphql::orm::ChangeAction::Created,
                                 id: entity.#pk_field.clone(),
                                 entity: Some(entity.clone()),
                             });
@@ -3256,16 +3252,16 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 #[graphql(name = "Id")] id: #pk_type,
                 #[graphql(name = "Input")] input: #update_input,
             ) -> async_graphql::Result<#result_type> {
-                use crate::graphql::auth::AuthExt;
-                use crate::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
+                use ::graphql_orm::graphql::auth::AuthExt;
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
                 let _user = ctx.auth_user()?;
-                let db = ctx.data_unchecked::<crate::db::Database>();
+                let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                 let pool = db.pool();
 
                 // Build dynamic UPDATE SQL based on provided fields
                 let mut set_clauses: Vec<String> = Vec::new();
-                let mut values: Vec<crate::graphql::orm::SqlValue> = Vec::new();
+                let mut values: Vec<::graphql_orm::graphql::orm::SqlValue> = Vec::new();
 
                 #(#update_field_checks)*
 
@@ -3288,7 +3284,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 // Add the ID to the values for the WHERE clause
                 values.push(SqlValue::String(id.to_string()));
 
-                let result = crate::graphql::orm::execute_with_binds(&sql, &values, pool).await;
+                let result = ::graphql_orm::graphql::orm::execute_with_binds(&sql, &values, pool).await;
 
                 match result {
                     Ok(r) if r.rows_affected() > 0 => {
@@ -3305,9 +3301,9 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                         match entity {
                             Some(entity) => {
                                 // Broadcast entity change event if subscription channel is configured
-                                if let Ok(tx) = ctx.data::<tokio::sync::broadcast::Sender<#changed_event>>() {
+                                if let Ok(tx) = ctx.data::<::graphql_orm::tokio::sync::broadcast::Sender<#changed_event>>() {
                                     let _ = tx.send(#changed_event {
-                                        action: crate::graphql::orm::ChangeAction::Updated,
+                                        action: ::graphql_orm::graphql::orm::ChangeAction::Updated,
                                         id: entity.#pk_field.clone(),
                                         entity: Some(entity.clone()),
                                     });
@@ -3333,11 +3329,11 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 ctx: &async_graphql::Context<'_>,
                 #[graphql(name = "Id")] id: #pk_type,
             ) -> async_graphql::Result<#result_type> {
-                use crate::graphql::auth::AuthExt;
-                use crate::graphql::orm::{DatabaseEntity, EntityQuery, SqlValue};
+                use ::graphql_orm::graphql::auth::AuthExt;
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, SqlValue};
 
                 let _user = ctx.auth_user()?;
-                let db = ctx.data_unchecked::<crate::db::Database>();
+                let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                 let pool = db.pool();
 
                 // Fetch entity before deletion for notification purposes
@@ -3360,14 +3356,14 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     1
                 );
                 let values = vec![SqlValue::String(id.to_string())];
-                let result = crate::graphql::orm::execute_with_binds(&sql, &values, pool).await;
+                let result = ::graphql_orm::graphql::orm::execute_with_binds(&sql, &values, pool).await;
 
                 match result {
                     Ok(r) if r.rows_affected() > 0 => {
                         // Broadcast entity change event if subscription channel is configured
-                        if let Ok(tx) = ctx.data::<tokio::sync::broadcast::Sender<#changed_event>>() {
+                        if let Ok(tx) = ctx.data::<::graphql_orm::tokio::sync::broadcast::Sender<#changed_event>>() {
                             let _ = tx.send(#changed_event {
-                                action: crate::graphql::orm::ChangeAction::Deleted,
+                                action: ::graphql_orm::graphql::orm::ChangeAction::Deleted,
                                 id: entity.#pk_field.clone(),
                                 entity: Some(entity.clone()),
                             });
@@ -3395,11 +3391,11 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 #[graphql(name = "Where")] where_input: Option<#where_input>,
                 #[graphql(name = "Input")] input: #update_input,
             ) -> async_graphql::Result<#update_many_result_type> {
-                use crate::graphql::auth::AuthExt;
-                use crate::graphql::orm::{DatabaseFilter, EntityQuery};
+                use ::graphql_orm::graphql::auth::AuthExt;
+                use ::graphql_orm::graphql::orm::{DatabaseFilter, EntityQuery};
 
                 let _user = ctx.auth_user()?;
-                let db = ctx.data_unchecked::<crate::db::Database>();
+                let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                 let pool = db.pool();
 
                 let filter = match where_input {
@@ -3409,7 +3405,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
 
                 // Build dynamic UPDATE SQL based on provided fields
                 let mut set_clauses: Vec<String> = Vec::new();
-                let mut values: Vec<crate::graphql::orm::SqlValue> = Vec::new();
+                let mut values: Vec<::graphql_orm::graphql::orm::SqlValue> = Vec::new();
 
                 #(#update_field_checks)*
 
@@ -3438,7 +3434,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 );
 
                 values.extend(filter_values);
-                let result = crate::graphql::orm::execute_with_binds(&sql, &values, pool).await;
+                let result = ::graphql_orm::graphql::orm::execute_with_binds(&sql, &values, pool).await;
 
                 match result {
                     Ok(r) => Ok(#update_many_result_type::ok(r.rows_affected() as i64)),
@@ -3453,11 +3449,11 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 ctx: &async_graphql::Context<'_>,
                 #[graphql(name = "Where")] where_input: Option<#where_input>,
             ) -> async_graphql::Result<#delete_many_result_type> {
-                use crate::graphql::auth::AuthExt;
-                use crate::graphql::orm::{DatabaseEntity, DatabaseFilter, EntityQuery, FromSqlRow};
+                use ::graphql_orm::graphql::auth::AuthExt;
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, DatabaseFilter, EntityQuery, FromSqlRow};
 
                 let _user = ctx.auth_user()?;
-                let db = ctx.data_unchecked::<crate::db::Database>();
+                let db = ctx.data_unchecked::<::graphql_orm::db::Database>();
                 let pool = db.pool();
 
                 let filter = match where_input {
@@ -3469,7 +3465,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 let (sql, values) = query.build_delete_sql();
                 let sql = #struct_name::__gom_rebind_sql(&sql, 1);
 
-                let result = crate::graphql::orm::execute_with_binds(&sql, &values, pool).await;
+                let result = ::graphql_orm::graphql::orm::execute_with_binds(&sql, &values, pool).await;
 
                 match result {
                     Ok(r) => Ok(#delete_many_result_type::ok(r.rows_affected() as i64)),
@@ -3493,16 +3489,16 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             async fn on_changed(
                 &self,
                 ctx: &async_graphql::Context<'_>,
-                #[graphql(name = "Filter")] _filter: Option<crate::graphql::orm::SubscriptionFilterInput>,
-            ) -> async_graphql::Result<impl futures::Stream<Item = #changed_event>> {
-                use futures::stream::{self, StreamExt};
-                use crate::graphql::auth::AuthExt;
+                #[graphql(name = "Filter")] _filter: Option<::graphql_orm::graphql::orm::SubscriptionFilterInput>,
+            ) -> async_graphql::Result<impl ::graphql_orm::futures::Stream<Item = #changed_event>> {
+                use ::graphql_orm::futures::stream::{self, StreamExt};
+                use ::graphql_orm::graphql::auth::AuthExt;
 
                 let _user = ctx.auth_user()?;
 
                 // Try to get the broadcast channel for this entity type
                 // If not available, return an empty stream (subscription not enabled)
-                let maybe_events = ctx.data_opt::<tokio::sync::broadcast::Sender<#changed_event>>();
+                let maybe_events = ctx.data_opt::<::graphql_orm::tokio::sync::broadcast::Sender<#changed_event>>();
 
                 Ok(match maybe_events {
                     None => {
@@ -3512,7 +3508,7 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     Some(events) => {
                         let rx = events.subscribe();
 
-                        use tokio_stream::wrappers::BroadcastStream;
+                        use ::graphql_orm::tokio_stream::wrappers::BroadcastStream;
 
                         BroadcastStream::new(rx)
                             .filter_map(move |result| async move {
@@ -3539,17 +3535,17 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             pub async fn insert(
                 pool: &#pool_type,
                 input: #create_input,
-            ) -> Result<Self, sqlx::Error> {
-                use crate::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
+            ) -> Result<Self, ::graphql_orm::sqlx::Error> {
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
                 #created_pk_init
                 let sql = Self::__gom_rebind_sql(#insert_sql, 1);
 
-                let mut bind_values: Vec<crate::graphql::orm::SqlValue> = Vec::new();
+                let mut bind_values: Vec<::graphql_orm::graphql::orm::SqlValue> = Vec::new();
                 #prepend_pk_bind
                 #(#insert_binds)*
 
-                crate::graphql::orm::execute_with_binds(&sql, &bind_values, pool).await?;
+                ::graphql_orm::graphql::orm::execute_with_binds(&sql, &bind_values, pool).await?;
 
                 EntityQuery::<Self>::new()
                     .where_clause(
@@ -3558,17 +3554,17 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                     )
                     .fetch_one(pool)
                     .await?
-                    .ok_or(sqlx::Error::RowNotFound)
+                    .ok_or(::graphql_orm::sqlx::Error::RowNotFound)
             }
 
             /// Find all entities matching the given filter
-            pub fn query<'a>(pool: &'a #pool_type) -> crate::graphql::orm::FindQuery<'a, Self, #where_input, #order_by_input> {
-                crate::graphql::orm::FindQuery::new(pool)
+            pub fn query<'a>(pool: &'a #pool_type) -> ::graphql_orm::graphql::orm::FindQuery<'a, Self, #where_input, #order_by_input> {
+                ::graphql_orm::graphql::orm::FindQuery::new(pool)
             }
 
             /// Find entity by ID
-            pub async fn get(pool: &#pool_type, id: &str) -> Result<Option<Self>, sqlx::Error> {
-                use crate::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
+            pub async fn get(pool: &#pool_type, id: &str) -> Result<Option<Self>, ::graphql_orm::sqlx::Error> {
+                use ::graphql_orm::graphql::orm::{DatabaseEntity, EntityQuery, FromSqlRow, SqlValue};
 
                 EntityQuery::<Self>::new()
                     .where_clause(
@@ -3580,9 +3576,9 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
             }
 
             /// Count entities matching the given filter
-            pub fn count_query<'a>(pool: &'a #pool_type) -> crate::graphql::orm::CountQuery<'a, #where_input> {
-                use crate::graphql::orm::DatabaseEntity;
-                crate::graphql::orm::CountQuery::new(pool, <Self as DatabaseEntity>::TABLE_NAME)
+            pub fn count_query<'a>(pool: &'a #pool_type) -> ::graphql_orm::graphql::orm::CountQuery<'a, #where_input> {
+                use ::graphql_orm::graphql::orm::DatabaseEntity;
+                ::graphql_orm::graphql::orm::CountQuery::new(pool, <Self as DatabaseEntity>::TABLE_NAME)
             }
 
             /// Search entities with fuzzy/similar text matching
@@ -3623,8 +3619,8 @@ fn generate_graphql_operations(input: &DeriveInput) -> syn::Result<proc_macro2::
                 threshold: f64,
                 filter: Option<#where_input>,
                 limit: Option<i64>,
-            ) -> Result<Vec<(Self, f64)>, sqlx::Error> {
-                use crate::graphql::orm::FuzzyMatcher;
+            ) -> Result<Vec<(Self, f64)>, ::graphql_orm::sqlx::Error> {
+                use ::graphql_orm::graphql::orm::FuzzyMatcher;
 
                 // Fetch candidates (optionally filtered)
                 let mut q = Self::query(pool);

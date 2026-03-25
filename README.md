@@ -4,14 +4,12 @@ Procedural macros for generating GraphQL entity types, relation resolvers, CRUD 
 
 ## Status
 
-This crate is being extracted from a standalone macro file into a reusable Rust crate intended for future projects.
+This crate now targets the `graphql-orm` runtime crate directly instead of expecting application-local host modules.
 
-Current priorities:
+Use it with:
 
-- package the macro as a proper proc-macro crate
-- reduce SQLite-specific assumptions
-- improve nested relation batching to avoid N+1 queries
-- prepare for PostgreSQL, MySQL, and SQL Server support
+- `graphql-orm`
+- `graphql-orm-macros`
 
 ## Included Macros
 
@@ -21,24 +19,12 @@ Current priorities:
 - `#[derive(GraphQLOperations)]`
 - `schema_roots!`
 
-## Current Coupling
-
-The macro has been made project-generic, but it is not yet framework-neutral. The generated code still expects a host crate to provide:
-
-- `crate::graphql::orm::*`
-- `crate::graphql::filters::*`
-- `crate::graphql::pagination::*`
-- `crate::graphql::auth::AuthExt`
-- `crate::db::Database`
-
-That host interface will be documented and progressively generalized as the crate evolves.
-
 ## Near-Term Roadmap
 
-1. Package the macro cleanly as a standalone crate.
+1. Expand runtime metadata and migration support in `graphql-orm`.
 2. Improve relation batching for nested queries with filters, sorting, and pagination.
-3. Introduce SQL dialect abstractions for SQLite, PostgreSQL, MySQL, and SQL Server.
-4. Add examples, tests, and reusable integration docs.
+3. Introduce full SQL dialect abstractions for SQLite, PostgreSQL, MySQL, and SQL Server.
+4. Add examples and integration docs for application crates.
 
 ## Development
 
@@ -53,14 +39,14 @@ cargo check
 - `mysql`
 - `mssql`
 
-Exactly one backend flag must be enabled at a time. The selected flag now controls the generated SQLx pool and row types:
+Exactly one backend flag must be enabled at a time. The selected flag now controls the generated runtime pool and row aliases:
 
-- `sqlite` -> `sqlx::SqlitePool`, `sqlx::sqlite::SqliteRow`
-- `postgres` -> `sqlx::PgPool`, `sqlx::postgres::PgRow`
-- `mysql` -> `sqlx::MySqlPool`, `sqlx::mysql::MySqlRow`
-- `mssql` -> `sqlx::MssqlPool`, `sqlx::mssql::MssqlRow`
+- `sqlite` -> `graphql_orm::DbPool`, `graphql_orm::DbRow`
+- `postgres` -> `graphql_orm::DbPool`, `graphql_orm::DbRow`
+- `mysql` -> planned
+- `mssql` -> planned
 
-The broader SQL generation is still SQLite-oriented for now, so non-SQLite backends should be treated as early compile-surface support rather than full dialect support.
+SQLite and PostgreSQL are covered by live integration tests through `graphql-orm`. MySQL and SQL Server remain planned.
 
 ## License
 
