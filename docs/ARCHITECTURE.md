@@ -11,17 +11,17 @@
 
 The immediate goal is to preserve the current generated API shape while reducing hard-coded assumptions and opening a path to backend portability.
 
-## Current Host-Crate Expectations
+## Current Runtime Expectations
 
-Today the generated code still assumes the consuming crate exposes:
+Today the generated code targets `graphql-orm` directly rather than application-local host modules.
 
-- `crate::graphql::orm::*`
-- `crate::graphql::filters::*`
-- `crate::graphql::pagination::*`
-- `crate::graphql::auth::AuthExt`
-- `crate::db::Database`
+That means the intended app integration shape is:
 
-This means the macro crate is currently reusable only across projects that share the same host interfaces.
+- application depends on `graphql-orm`
+- `graphql-orm` re-exports the derive macros
+- generated code targets `::graphql_orm::*`
+
+This is a major improvement over the older host-crate model because applications no longer need to mirror a crate-local `db` / `graphql` module structure just to consume the macros.
 
 ## Planned Extraction Boundary
 
@@ -41,6 +41,8 @@ The long-term design should split responsibilities like this:
 - query execution
 - backend-specific row decoding and bind handling
 - auth/context/database integration
+
+That host integration layer is now effectively the `graphql-orm` runtime crate.
 
 ## Relation Loading Direction
 

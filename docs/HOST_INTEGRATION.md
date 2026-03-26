@@ -10,9 +10,15 @@ This document describes the current expectations and the next abstraction layer 
 - multi-database support
 - cleaner long-term reuse
 
-## Current Required Host Modules
+## Current Integration Surface
 
-Today the generated code assumes the consuming crate exposes:
+Today the generated code targets the `graphql-orm` runtime crate directly.
+
+For normal application use, the consuming app should depend on:
+
+- `graphql-orm`
+
+The app should not need to expose custom host-crate modules like:
 
 - `crate::db::Database`
 - `crate::graphql::auth::AuthExt`
@@ -20,6 +26,17 @@ Today the generated code assumes the consuming crate exposes:
 - `crate::graphql::pagination::*`
 - `crate::graphql::orm::*`
 - `crate::graphql::loaders::RelationLoader`
+
+Those paths describe the older host-crate model and are now historical.
+
+The current generated code expects the runtime crate to provide the integration surface instead, including:
+
+- `::graphql_orm::db::Database`
+- `::graphql_orm::graphql::auth::AuthExt`
+- `::graphql_orm::graphql::filters::*`
+- `::graphql_orm::graphql::pagination::*`
+- `::graphql_orm::graphql::orm::*`
+- `::graphql_orm::graphql::loaders::RelationLoader`
 
 ## Recommended Future Host Traits
 
